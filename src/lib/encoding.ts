@@ -1,0 +1,25 @@
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/u, '')
+}
+
+export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+  if (!/^[A-Za-z0-9_-]*$/u.test(value)) {
+    throw new Error('Invalid Base64URL encoding')
+  }
+
+  const paddingLength = (4 - (value.length % 4)) % 4
+  const padded = value.replaceAll('-', '+').replaceAll('_', '/') + '='.repeat(paddingLength)
+
+  try {
+    const binary = atob(padded)
+    const bytes = new Uint8Array(binary.length)
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index)
+    }
+    return bytes
+  } catch {
+    throw new Error('Invalid Base64URL encoding')
+  }
+}

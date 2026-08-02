@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "secret-gram",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-08-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./dist/client",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "ROOMS", "class_name": "RoomDurableObject" },
+      { "name": "RATE_LIMITERS", "class_name": "RateLimiterDurableObject" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RoomDurableObject", "RateLimiterDurableObject"]
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "FILES", "bucket_name": "secret-gram-files" }
+  ],
+  "vars": {
+    "ROOM_TTL_MAX_SECONDS": "2592000",
+    "MESSAGE_RETENTION_SECONDS": "604800",
+    "MAX_ROOM_CONNECTIONS": "100",
+    "MAX_FILE_BYTES": "67108864",
+    "MAX_ROOM_FILE_BYTES": "536870912"
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  }
+}
