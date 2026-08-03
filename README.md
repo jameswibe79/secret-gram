@@ -26,17 +26,32 @@ SecretGram is a deployable reference implementation, not an independently audite
 
 ## Architecture
 
-```text
-Browser A                           Cloudflare                           Browser B
-─────────                           ──────────                           ─────────
-room secret ──HKDF──┐
-                    ├─ locator ───> Worker ──> Room Durable Object <── locator
-                    ├─ auth token     │          │ SQLite
-                    └─ message root   │          │ WebSockets
-                                       │          └ encrypted metadata
-message/file plaintext               │
-        │                             └────────> R2 encrypted chunks
-        └ AES-256-GCM ciphertext ─────────────────────────────────────> decrypt
+```mermaid
+flowchart TB
+  subgraph Endpoints["Trusted browser endpoints · plaintext boundary"]
+    direction LR
+    BrowserA["Browser A<br/>React UI + Web Crypto<br/>plaintext, files, room secret"]
+    BrowserB["Browser B<br/>React UI + Web Crypto<br/>plaintext, files, room secret"]
+    BrowserA ~~~ BrowserB
+  end
+
+  subgraph Cloudflare["Cloudflare · ciphertext and routing metadata only"]
+    direction LR
+    RateDO["Rate Limiter DO<br/>source-scoped windows"]
+    Worker["Worker<br/>HTTP API + static assets"]
+    RoomDO["Room Durable Object<br/>ordering + WebSockets + alarms"]
+    SQLite[("DO SQLite<br/>ciphertext events + upload state")]
+    R2[("R2<br/>encrypted file chunks")]
+
+    Worker -->|"source limits"| RateDO
+    Worker <-->|"room RPC"| RoomDO
+    RoomDO <-->|"ordered state"| SQLite
+    Worker <-->|"encrypted chunks"| R2
+    RoomDO -->|"expiration cleanup"| R2
+  end
+
+  BrowserA <-->|"HTTPS / WebSocket<br/>locator + auth + ciphertext"| Worker
+  BrowserB <-->|"HTTPS / WebSocket<br/>locator + auth + ciphertext"| Worker
 ```
 
 D1 is intentionally not part of the real-time data plane. It can be added later as a control plane for organizations, policy, audit events, or cross-room administration.
