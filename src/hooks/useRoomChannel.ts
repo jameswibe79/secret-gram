@@ -5,15 +5,18 @@ import {
   createSocketTicket,
   getRoomMessages,
   postRoomMessage,
+  recallRoomMessage,
   roomWebSocketUrl,
 } from '../lib/api'
-import { decryptMessage, encryptMessage } from '../lib/message-crypto'
+import { createRecallCredential, decryptMessage, encryptMessage } from '../lib/message-crypto'
 import type { ActiveRoomSession } from '../lib/session'
 import {
   webSocketServerFrameSchema,
   type ClientMessageEnvelope,
   type PlainMessage,
   type StoredMessageEnvelope,
+  type StoredRecallEvent,
+  type StoredRoomEvent,
 } from '../shared/protocol'
 
 export type ConnectionStatus = 'connecting' | 'connected' | 'reconnecting' | 'offline'
@@ -21,17 +24,22 @@ export type DeliveryStatus = 'sending' | 'stored' | 'failed'
 
 export interface TimelineMessage {
   id: string
-  envelope: ClientMessageEnvelope
+  senderId: string
+  envelope: ClientMessageEnvelope | null
   sequence: number | null
   serverCreatedAt: number | null
   content: PlainMessage | null
   delivery: DeliveryStatus
+  recallToken?: string
+  recalledAt?: number
+  recalling?: boolean
   error?: string
 }
 
 interface PendingMessage {
   envelope: ClientMessageEnvelope
   content: PlainMessage
+  recallToken: string
 }
 
 function sortTimeline(messages: TimelineMessage[]): TimelineMessage[] {
@@ -62,8 +70,8 @@ export function mergeTimeline(
 export async function drainRoomHistory(
   afterSequence: number,
   pageSize: number,
-  fetchPage: (after: number, limit: number) => Promise<StoredMessageEnvelope[]>,
-  applyMessage: (message: StoredMessageEnvelope) => Promise<void>,
+  fetchPage: (after: number, limit: number) => Promise<StoredRoomEvent[]>,
+  applyMessage: (message: StoredRoomEvent) => Promise<void>,
   shouldStop: () => boolean = () => false,
 ): Promise<number> {
   let cursor = afterSequence
@@ -116,6 +124,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
       setMessages((current) =>
         mergeTimeline(current, {
           id: stored.id,
+          senderId: stored.senderId,
           envelope: stored,
           sequence: stored.sequence,
           serverCreatedAt: stored.serverCreatedAt,
@@ -126,6 +135,40 @@ export function useRoomChannel(session: ActiveRoomSession) {
       )
     },
     [session.locator, session.messageRoot, settlePending],
+  )
+
+  const applyRecall = useCallback(
+    (event: StoredRecallEvent) => {
+      maxSequenceRef.current = Math.max(maxSequenceRef.current, event.sequence)
+      settlePending(event.messageId)
+      setMessages((current) =>
+        mergeTimeline(current, {
+          id: event.messageId,
+          senderId: event.senderId,
+          envelope: null,
+          sequence: event.sequence,
+          serverCreatedAt: event.recalledAt,
+          content: null,
+          delivery: 'stored',
+          recalledAt: event.recalledAt,
+          recalling: false,
+          recallToken: undefined,
+          error: undefined,
+        }),
+      )
+    },
+    [settlePending],
+  )
+
+  const applyEvent = useCallback(
+    async (event: StoredRoomEvent) => {
+      if ('type' in event) {
+        applyRecall(event)
+        return
+      }
+      await applyStored(event)
+    },
+    [applyRecall, applyStored],
   )
 
   const postPending = useCallback(
@@ -174,7 +217,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
         limit,
         lifecycle.signal,
       ),
-      applyStored,
+      applyEvent,
       () => stopped,
     )
 
@@ -271,6 +314,8 @@ export function useRoomChannel(session: ActiveRoomSession) {
             lastPongAt = Date.now()
           } else if (frame.type === 'message') {
             void applyStored(frame.message)
+          } else if (frame.type === 'recall') {
+            applyRecall(frame)
           } else if (frame.type === 'ack') {
             settlePending(frame.id)
             setMessages((current) => {
@@ -374,21 +419,38 @@ export function useRoomChannel(session: ActiveRoomSession) {
       for (const timer of ackTimers.values()) clearTimeout(timer)
       ackTimers.clear()
     }
-  }, [applyStored, postPending, session.authToken, session.deviceId, session.locator, settlePending])
+  }, [
+    applyEvent,
+    applyRecall,
+    applyStored,
+    postPending,
+    session.authToken,
+    session.deviceId,
+    session.locator,
+    settlePending,
+  ])
 
   const sendPlainMessage = useCallback(
     async (content: PlainMessage) => {
-      const envelope = await encryptMessage(session.sender, session.locator, content)
-      const pending = { envelope, content }
+      const recallCredential = await createRecallCredential()
+      const envelope = await encryptMessage(
+        session.sender,
+        session.locator,
+        content,
+        recallCredential.verifier,
+      )
+      const pending = { envelope, content, recallToken: recallCredential.token }
       pendingRef.current.set(envelope.id, pending)
       setMessages((current) =>
         mergeTimeline(current, {
           id: envelope.id,
+          senderId: envelope.senderId,
           envelope,
           sequence: null,
           serverCreatedAt: null,
           content,
           delivery: 'sending',
+          recallToken: recallCredential.token,
         }),
       )
 
@@ -409,9 +471,17 @@ export function useRoomChannel(session: ActiveRoomSession) {
   const retryMessage = useCallback(
     async (id: string) => {
       const message = messages.find((candidate) => candidate.id === id)
-      if (message?.content === null || message === undefined) return
-      const pending = { envelope: message.envelope, content: message.content }
-      pendingRef.current.set(id, pending)
+      if (
+        message === undefined ||
+        message.content === null ||
+        message.envelope === null ||
+        message.recallToken === undefined
+      ) return
+      const pending = {
+        envelope: message.envelope,
+        content: message.content,
+        recallToken: message.recallToken,
+      }
       setMessages((current) =>
         current.map((candidate) =>
           candidate.id === id ? { ...candidate, delivery: 'sending', error: undefined } : candidate,
@@ -422,6 +492,47 @@ export function useRoomChannel(session: ActiveRoomSession) {
     [messages, postPending],
   )
 
+  const recallMessage = useCallback(
+    async (id: string) => {
+      const message = messages.find((candidate) => candidate.id === id)
+      if (
+        message === undefined ||
+        message.senderId !== session.deviceId ||
+        message.delivery !== 'stored' ||
+        message.recalledAt !== undefined ||
+        message.recallToken === undefined
+      ) return
+      setMessages((current) =>
+        current.map((candidate) =>
+          candidate.id === id ? { ...candidate, recalling: true, error: undefined } : candidate,
+        ),
+      )
+      try {
+        const result = await recallRoomMessage(
+          session.locator,
+          session.authToken,
+          session.deviceId,
+          id,
+          message.recallToken,
+        )
+        applyRecall(result.event)
+      } catch (error) {
+        setMessages((current) =>
+          current.map((candidate) =>
+            candidate.id === id
+              ? {
+                  ...candidate,
+                  recalling: false,
+                  error: error instanceof Error ? error.message : 'Message recall failed.',
+                }
+              : candidate,
+          ),
+        )
+      }
+    },
+    [applyRecall, messages, session.authToken, session.deviceId, session.locator],
+  )
+
   return {
     messages,
     status,
@@ -429,5 +540,6 @@ export function useRoomChannel(session: ActiveRoomSession) {
     connectionError,
     sendPlainMessage,
     retryMessage,
+    recallMessage,
   }
 }

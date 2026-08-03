@@ -48,6 +48,7 @@ describe('mergeTimeline', () => {
     const envelope = stored(1)
     const optimistic: TimelineMessage = {
       id: envelope.id,
+      senderId: envelope.senderId,
       envelope,
       sequence: null,
       serverCreatedAt: null,
@@ -74,5 +75,48 @@ describe('mergeTimeline', () => {
 
     expect(merged[0]?.content).toBeNull()
     expect(merged[0]?.error).toBe('Integrity verification failed')
+  })
+
+  it('replaces recalled plaintext and its capability with a tombstone', () => {
+    const envelope = stored(1)
+    const current: TimelineMessage = {
+      id: envelope.id,
+      senderId: envelope.senderId,
+      envelope,
+      sequence: 1,
+      serverCreatedAt: 1,
+      content: {
+        version: 1,
+        id: envelope.id,
+        senderId: envelope.senderId,
+        senderName: 'Alice',
+        clientCreatedAt: 1,
+        kind: 'text',
+        text: 'remove me',
+      },
+      delivery: 'stored',
+      recallToken: 'A'.repeat(43),
+    }
+
+    const recalled = mergeTimeline([current], {
+      id: envelope.id,
+      senderId: envelope.senderId,
+      envelope: null,
+      sequence: 2,
+      serverCreatedAt: 2,
+      content: null,
+      delivery: 'stored',
+      recallToken: undefined,
+      recalledAt: 2,
+    })
+
+    expect(recalled[0]).toMatchObject({
+      id: envelope.id,
+      envelope: null,
+      sequence: 2,
+      content: null,
+      recalledAt: 2,
+    })
+    expect(recalled[0]?.recallToken).toBeUndefined()
   })
 })

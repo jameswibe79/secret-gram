@@ -12,6 +12,7 @@ import { base64UrlToBytes, bytesToBase64Url } from './encoding'
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: true })
 const SENDER_EPOCH_BYTES = 16
+const RECALL_TOKEN_BYTES = 32
 
 export interface MessageSenderContext {
   readonly senderEpochId: string
@@ -28,18 +29,19 @@ function authenticatedMetadata(
     senderId: string
     senderEpochId: string
     counter: number
+    recallVerifier?: string
   },
 ): Uint8Array<ArrayBuffer> {
-  return encoder.encode(
-    [
-      'secretgram/message/v2',
-      locator,
-      envelope.id,
-      envelope.senderId,
-      envelope.senderEpochId,
-      String(envelope.counter),
-    ].join('\n'),
-  )
+  const fields = [
+    'secretgram/message/v2',
+    locator,
+    envelope.id,
+    envelope.senderId,
+    envelope.senderEpochId,
+    String(envelope.counter),
+  ]
+  if (envelope.recallVerifier !== undefined) fields.push(envelope.recallVerifier)
+  return encoder.encode(fields.join('\n'))
 }
 
 function counterNonce(counter: number): Uint8Array<ArrayBuffer> {
@@ -87,10 +89,25 @@ export async function createMessageSender(
   }
 }
 
+export interface RecallCredential {
+  token: string
+  verifier: string
+}
+
+export async function createRecallCredential(): Promise<RecallCredential> {
+  const tokenBytes = crypto.getRandomValues(new Uint8Array(RECALL_TOKEN_BYTES))
+  const verifier = new Uint8Array(await crypto.subtle.digest('SHA-256', tokenBytes))
+  return {
+    token: bytesToBase64Url(tokenBytes),
+    verifier: bytesToBase64Url(verifier),
+  }
+}
+
 export async function encryptMessage(
   sender: MessageSenderContext,
   locator: string,
   message: PlainMessage,
+  recallVerifier?: string,
 ): Promise<ClientMessageEnvelope> {
   if (sender.locator !== locator) throw new Error('Sending session does not belong to this room')
   const validated = plainMessageSchema.parse(message)
@@ -104,6 +121,7 @@ export async function encryptMessage(
     senderId: validated.senderId,
     senderEpochId: sender.senderEpochId,
     counter,
+    ...(recallVerifier === undefined ? {} : { recallVerifier }),
   }
   const ciphertext = await crypto.subtle.encrypt(
     {
@@ -116,10 +134,10 @@ export async function encryptMessage(
     encoder.encode(JSON.stringify(validated)),
   )
 
-  return {
+  return clientMessageEnvelopeSchema.parse({
     ...metadata,
     ciphertext: bytesToBase64Url(new Uint8Array(ciphertext)),
-  }
+  })
 }
 
 export async function decryptMessage(

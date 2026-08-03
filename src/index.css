@@ -1,37 +1,91 @@
 :root {
-  --canvas: #f3f5f7;
-  --surface: #ffffff;
-  --surface-subtle: #f8fafb;
-  --surface-raised: #ffffff;
-  --text: #182127;
-  --text-muted: #64727c;
-  --text-soft: #89949c;
-  --border: #dbe1e5;
-  --border-strong: #c5ced4;
-  --accent: #0b6b68;
-  --accent-hover: #075955;
-  --accent-soft: #e6f2f1;
-  --accent-border: #acd2cf;
-  --danger: #a33a3a;
-  --danger-soft: #f9eeee;
-  --warning: #805c16;
-  --warning-soft: #fbf6e8;
-  --success: #26724e;
-  --shadow-small: 0 1px 2px rgb(14 30 37 / 6%), 0 3px 12px rgb(14 30 37 / 4%);
-  --shadow-modal: 0 24px 70px rgb(10 24 31 / 22%);
-  --sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --canvas: #090a0a;
+  --surface: #101211;
+  --surface-subtle: #0c0e0d;
+  --surface-raised: #141715;
+  --text: #f2f0e8;
+  --text-muted: #a2a8a1;
+  --text-soft: #6f776f;
+  --border: #252a26;
+  --border-strong: #394139;
+  --accent: #7dff4f;
+  --accent-hover: #a4ff82;
+  --accent-soft: rgb(125 255 79 / 8%);
+  --accent-border: rgb(125 255 79 / 34%);
+  --accent-glow: rgb(125 255 79 / 10%);
+  --danger: #ff8585;
+  --danger-soft: rgb(255 100 100 / 9%);
+  --danger-border: rgb(255 133 133 / 32%);
+  --warning: #f2c86b;
+  --warning-soft: rgb(242 200 107 / 9%);
+  --warning-border: rgb(242 200 107 / 24%);
+  --success: #7dff4f;
+  --accent-contrast: #090a0a;
+  --focus-ring: rgb(125 255 79 / 70%);
+  --grid-line: rgb(125 255 79 / 3.5%);
+  --header-surface: rgb(9 10 10 / 84%);
+  --panel-surface: rgb(16 18 17 / 88%);
+  --panel-surface-strong: rgb(16 18 17 / 94%);
+  --field-surface: rgb(9 10 10 / 72%);
+  --workspace-surface: rgb(9 10 10 / 72%);
+  --preview-surface: #151816;
+  --preview-checker: rgb(255 255 255 / 4%);
+  --modal-backdrop: rgb(0 0 0 / 76%);
+  --color-scheme: dark;
+  --shadow-small: none;
+  --shadow-modal: 0 28px 90px rgb(0 0 0 / 55%);
+  --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-family: var(--sans);
   color: var(--text);
   background: var(--canvas);
+  color-scheme: var(--color-scheme);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
+:root[data-theme='day'] {
+  --canvas: #f4f3ed;
+  --surface: #fbfaf6;
+  --surface-subtle: #edeee7;
+  --surface-raised: #fffefa;
+  --text: #182019;
+  --text-muted: #566158;
+  --text-soft: #768077;
+  --border: #d2d8d1;
+  --border-strong: #aab5aa;
+  --accent: #267a35;
+  --accent-hover: #1d6129;
+  --accent-glow: rgb(38 122 53 / 12%);
+  --accent-soft: rgb(38 122 53 / 8%);
+  --accent-border: rgb(38 122 53 / 36%);
+  --danger-border: rgb(165 63 63 / 30%);
+  --danger: #a53f3f;
+  --danger-soft: rgb(165 63 63 / 8%);
+  --warning-border: rgb(138 98 22 / 28%);
+  --warning: #8a6216;
+  --warning-soft: rgb(138 98 22 / 9%);
+  --success: #267a35;
+  --accent-contrast: #fffefa;
+  --focus-ring: rgb(38 122 53 / 65%);
+  --grid-line: rgb(38 122 53 / 5%);
+  --header-surface: rgb(244 243 237 / 88%);
+  --panel-surface: rgb(251 250 246 / 92%);
+  --panel-surface-strong: rgb(251 250 246 / 97%);
+  --field-surface: rgb(255 254 250 / 92%);
+  --workspace-surface: rgb(240 241 235 / 78%);
+  --preview-surface: #e7e9e3;
+  --modal-backdrop: rgb(24 32 25 / 48%);
+  --preview-checker: rgb(24 32 25 / 6%);
+  --shadow-modal: 0 28px 90px rgb(24 32 25 / 24%);
+  --color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
+  scrollbar-color: var(--border-strong) transparent;
 }
 
 html,
@@ -44,7 +98,13 @@ body,
 
 body {
   min-height: 100svh;
-  background: var(--canvas);
+  background-color: var(--canvas);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-position: -1px -1px;
+  background-size: 32px 32px;
+  background-attachment: fixed;
 }
 
 button,
@@ -70,12 +130,12 @@ select:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 object:focus-visible {
-  outline: 3px solid rgb(11 107 104 / 24%);
-  outline-offset: 2px;
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
 }
 
 ::selection {
-  color: #fff;
+  color: var(--accent-contrast);
   background: var(--accent);
 }
 

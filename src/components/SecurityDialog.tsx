@@ -4,6 +4,8 @@ interface SecurityDialogProps {
   title: string
   onClose: () => void
   children: ReactNode
+  className?: string
+  backdropClassName?: string
 }
 
 const FOCUSABLE_SELECTOR = [
@@ -15,7 +17,13 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
-export function SecurityDialog({ title, onClose, children }: SecurityDialogProps) {
+export function SecurityDialog({
+  title,
+  onClose,
+  children,
+  className = '',
+  backdropClassName = '',
+}: SecurityDialogProps) {
   const dialogRef = useRef<HTMLElement>(null)
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
@@ -61,10 +69,14 @@ export function SecurityDialog({ title, onClose, children }: SecurityDialogProps
   }, [])
 
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+    <div
+      className={backdropClassName ? `modal-backdrop ${backdropClassName}` : 'modal-backdrop'}
+      role="presentation"
+      onMouseDown={onClose}
+    >
       <section
         ref={dialogRef}
-        className="modal"
+        className={className ? `modal ${className}` : 'modal'}
         role="dialog"
         aria-modal="true"
         aria-labelledby="security-dialog-title"

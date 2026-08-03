@@ -11,6 +11,7 @@ export const MAX_ECMASCRIPT_TIMESTAMP_MS = 8_640_000_000_000_000
 
 const uuidSchema = z.string().uuid()
 const base64UrlSchema = z.string().regex(/^[A-Za-z0-9_-]+$/u)
+export const recallTokenSchema = base64UrlSchema.length(43)
 export const timestampMillisecondsSchema = z
   .number()
   .int()
@@ -55,12 +56,26 @@ export const clientMessageEnvelopeSchema = z.strictObject({
   senderEpochId: base64UrlSchema.length(22),
   counter: z.number().int().nonnegative().max(MAX_MESSAGE_COUNTER),
   ciphertext: base64UrlSchema.min(22).max(MAX_ENCRYPTED_MESSAGE_CHARACTERS),
+  recallVerifier: recallTokenSchema.optional(),
 })
 
 export const storedMessageEnvelopeSchema = clientMessageEnvelopeSchema.extend({
   sequence: z.number().int().positive(),
   serverCreatedAt: timestampMillisecondsSchema,
 })
+
+export const storedRecallEventSchema = z.strictObject({
+  type: z.literal('recall'),
+  messageId: uuidSchema,
+  senderId: uuidSchema,
+  sequence: z.number().int().positive(),
+  recalledAt: timestampMillisecondsSchema,
+})
+
+export const storedRoomEventSchema = z.union([
+  storedMessageEnvelopeSchema,
+  storedRecallEventSchema,
+])
 
 export const webSocketClientFrameSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('message'), envelope: clientMessageEnvelopeSchema }),
@@ -81,6 +96,13 @@ export const webSocketServerFrameSchema = z.discriminatedUnion('type', [
     sequence: z.number().int().positive(),
     duplicate: z.boolean(),
   }),
+  z.strictObject({
+    type: z.literal('recall'),
+    messageId: uuidSchema,
+    senderId: uuidSchema,
+    sequence: z.number().int().positive(),
+    recalledAt: timestampMillisecondsSchema,
+  }),
   z.strictObject({ type: z.literal('pong'), at: timestampMillisecondsSchema }),
   z.strictObject({
     type: z.literal('error'),
@@ -93,5 +115,7 @@ export type FileDescriptor = z.infer<typeof fileDescriptorSchema>
 export type PlainMessage = z.infer<typeof plainMessageSchema>
 export type ClientMessageEnvelope = z.infer<typeof clientMessageEnvelopeSchema>
 export type StoredMessageEnvelope = z.infer<typeof storedMessageEnvelopeSchema>
+export type StoredRecallEvent = z.infer<typeof storedRecallEventSchema>
+export type StoredRoomEvent = z.infer<typeof storedRoomEventSchema>
 export type WebSocketClientFrame = z.infer<typeof webSocketClientFrameSchema>
 export type WebSocketServerFrame = z.infer<typeof webSocketServerFrameSchema>

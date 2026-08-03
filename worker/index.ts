@@ -4,6 +4,7 @@ import {
   MAX_FILE_BYTES,
   MAX_FILE_CHUNKS,
   clientMessageEnvelopeSchema,
+  recallTokenSchema,
 } from '../src/shared/protocol'
 import {
   HttpError,
@@ -35,6 +36,10 @@ const postMessageSchema = z
     deviceId: deviceIdSchema,
     envelope: clientMessageEnvelopeSchema,
   })
+  .strict()
+
+const recallMessageSchema = z
+  .object({ deviceId: deviceIdSchema, recallToken: recallTokenSchema })
   .strict()
 
 const socketTicketSchema = z.object({ deviceId: deviceIdSchema }).strict()
@@ -127,6 +132,8 @@ function roomFailure(reason: string): HttpError {
     case 'message_id_conflict':
     case 'sender_counter_conflict':
       return new HttpError(409, 'conflict')
+    case 'not_recallable':
+      return new HttpError(409, 'not_recallable')
     case 'capacity':
     case 'rate_limited':
       return new HttpError(429, 'rate_limited')
@@ -199,6 +206,28 @@ async function route(request: Request, env: Env, requestId: string): Promise<Res
     if (!result.ok) throw roomFailure(result.reason)
     return successResponse(
       { duplicate: result.duplicate, message: result.message },
+      result.duplicate ? 200 : 201,
+      requestId,
+    )
+  }
+
+  const recallMatch =
+    /^\/api\/v1\/rooms\/([A-Za-z0-9_-]{43})\/messages\/([0-9a-f-]{36})\/recall$/iu.exec(
+      url.pathname,
+    )
+  if (recallMatch !== null && request.method === 'POST') {
+    await enforceRateLimit(request, env, 'message-recall', 60, 60)
+    const token = bearerToken(request)
+    const input = await parseJson(request, recallMessageSchema)
+    const result = await env.ROOMS.getByName(recallMatch[1]).recallMessage(
+      token,
+      input.deviceId,
+      recallMatch[2],
+      input.recallToken,
+    )
+    if (!result.ok) throw roomFailure(result.reason)
+    return successResponse(
+      { duplicate: result.duplicate, event: result.event },
       result.duplicate ? 200 : 201,
       requestId,
     )

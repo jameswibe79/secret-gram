@@ -98,6 +98,10 @@ Messages use client-generated UUIDs for idempotency:
 - reusing an ID with different metadata or ciphertext returns a conflict;
 - reusing a sender epoch/counter pair for another ID returns a conflict.
 
+New messages also receive a random 256-bit recall capability. Its SHA-256 verifier is authenticated as part of the message envelope and retained with the ciphertext. The raw capability remains in the sending tab until the sender requests recall, at which point the Durable Object validates it and atomically replaces the ciphertext row with an ordered recall tombstone. The tombstone is broadcast to live peers and returned by history pagination, so clients remove decrypted content from their active timeline without creating a sequence gap.
+
+Recall is a server-retention operation, not guaranteed erasure from recipients. A recipient may already have copied, downloaded, screenshotted, or otherwise retained decrypted content. Leaving or reloading the sending tab discards its in-memory recall capabilities, so that browser can no longer recall earlier messages. Messages created before recall verifiers were introduced are not recallable.
+
 This protocol does not implement a Double Ratchet, sender authentication signatures, forward secrecy, or post-compromise security.
 
 ## Message delivery
@@ -110,6 +114,7 @@ This protocol does not implement a Double Ratchet, sender authentication signatu
 6. If no acknowledgement arrives, the same envelope is retried over HTTP.
 7. The Durable Object persists before broadcasting and acknowledging.
 8. Reconnect uses sequence-based history catch-up and drains every page before flushing pending messages.
+9. Recall events use the same ordered history and WebSocket stream, replacing message content with a tombstone on every connected client.
 
 Server acknowledgement means only that ciphertext was stored. It is not a recipient read or delivery receipt.
 

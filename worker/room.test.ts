@@ -154,6 +154,47 @@ describe('RoomDurableObject authentication', () => {
     expect(history.messages).toEqual([first.message])
   })
 
+  it('recalls a stored message only with its sender capability and is idempotent', async () => {
+    const locator = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+    const auth = await authFixture()
+    const recall = await authFixture()
+    const wrongRecall = await authFixture()
+    const room = roomStub(locator)
+    const senderId = crypto.randomUUID()
+    const otherDeviceId = crypto.randomUUID()
+    const message = { ...envelope(senderId), recallVerifier: recall.verifier }
+    await room.initialize({ locator, authVerifier: auth.verifier, ttlSeconds: 3_600 })
+    expect((await room.appendMessage(auth.token, senderId, message)).ok).toBe(true)
+
+    await expect(
+      room.recallMessage(auth.token, senderId, message.id, wrongRecall.token),
+    ).resolves.toMatchObject({ ok: false, reason: 'forbidden' })
+    await expect(
+      room.recallMessage(auth.token, otherDeviceId, message.id, recall.token),
+    ).resolves.toMatchObject({ ok: false, reason: 'forbidden' })
+
+    const recalled = await room.recallMessage(auth.token, senderId, message.id, recall.token)
+    const repeated = await room.recallMessage(auth.token, senderId, message.id, recall.token)
+    expect(recalled).toMatchObject({
+      ok: true,
+      duplicate: false,
+      event: {
+        type: 'recall',
+        messageId: message.id,
+        senderId,
+        sequence: 2,
+      },
+    })
+    expect(repeated).toMatchObject({
+      ok: true,
+      duplicate: true,
+      event: recalled.event,
+    })
+
+    const history = await room.getMessages(auth.token, 0, 50)
+    expect(history.messages).toEqual([recalled.event])
+  })
+
   it('paginates retained history from the oldest message without gaps', async () => {
     const locator = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
     const auth = await authFixture()
@@ -458,6 +499,7 @@ describe('RoomDurableObject authentication', () => {
   it('persists and broadcasts opaque messages over authenticated sockets', async () => {
     const locator = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
     const auth = await authFixture()
+    const recall = await authFixture()
     const room = roomStub(locator)
     const firstDevice = crypto.randomUUID()
     const secondDevice = crypto.randomUUID()
@@ -485,7 +527,7 @@ describe('RoomDurableObject authentication', () => {
     secondSocket.accept()
     await Promise.all([firstReady, secondReady])
 
-    const outbound = envelope(firstDevice)
+    const outbound = { ...envelope(firstDevice), recallVerifier: recall.verifier }
     const firstDelivery = waitForFrame(firstSocket, 'message')
     const secondDelivery = waitForFrame(secondSocket, 'message')
     const acknowledgement = waitForFrame(firstSocket, 'ack')
@@ -499,8 +541,26 @@ describe('RoomDurableObject authentication', () => {
       sequence: 1,
       duplicate: false,
     })
+    const firstRecall = waitForFrame(firstSocket, 'recall')
+    const secondRecall = waitForFrame(secondSocket, 'recall')
+    const recalled = await room.recallMessage(auth.token, firstDevice, outbound.id, recall.token)
+    expect(recalled.ok).toBe(true)
+    await expect(firstRecall).resolves.toMatchObject({
+      type: 'recall',
+      messageId: outbound.id,
+      senderId: firstDevice,
+      sequence: 2,
+    })
+    await expect(secondRecall).resolves.toMatchObject({
+      type: 'recall',
+      messageId: outbound.id,
+      senderId: firstDevice,
+      sequence: 2,
+    })
     const history = await room.getMessages(auth.token, 0, 50)
-    expect(history.messages).toHaveLength(1)
+    expect(history.messages).toMatchObject([
+      { type: 'recall', messageId: outbound.id, senderId: firstDevice, sequence: 2 },
+    ])
 
     firstSocket.close(1000, 'test complete')
     secondSocket.close(1000, 'test complete')

@@ -64,6 +64,12 @@ The protocol does not ratchet keys. A room secret obtained later can derive mess
 
 Display names, device UUIDs, and left/right message placement are presentation data, not cryptographic identities. Any participant with the room code can claim another display name. Verify people and room codes through an independent channel.
 
+### Recall is not remote erasure
+
+Message recall removes the retained ciphertext from the room and distributes an ordered tombstone to active and reconnecting clients. It cannot erase plaintext that a recipient already copied, downloaded, screenshotted, cached outside the application, or observed through a compromised endpoint.
+
+Recall authorization uses a random capability generated with the message. Its verifier is authenticated with the encrypted envelope and stored by the service; the raw capability stays in the active sending tab until it is presented to the recall endpoint. Reloading or leaving discards that capability, and older messages without a verifier cannot be recalled. Recall does not establish or authenticate a human identity.
+
 ### Metadata visibility
 
 Cloudflare and the operator can observe IP addresses, timing, request paths, room locators, message ordering, ciphertext length, file chunk counts and sizes, connection counts, and operational logs. Traffic analysis may reveal relationships or content categories even without plaintext.
@@ -103,6 +109,8 @@ Because the server does not possess plaintext or file keys, it cannot perform se
 - Monotonic counter nonce
 - Versioned authenticated additional data
 - Durable Object uniqueness constraint on sender epoch and counter
+- Optional 256-bit recall capability with a SHA-256 verifier authenticated by the message envelope
+- Ordered recall tombstones that replace retained message ciphertext
 
 ### Files
 
@@ -127,6 +135,7 @@ Production logs must never include:
 
 - room codes or URL fragments;
 - authorization tokens or WebSocket tickets;
+- raw recall capabilities or recall verifiers;
 - request bodies or encrypted message envelopes;
 - filenames, MIME types, captions, or plaintext;
 - full URLs containing query parameters;

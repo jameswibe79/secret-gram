@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getRoomInfo, putEncryptedChunk } from './api'
+import { ApiError, getRoomInfo, putEncryptedChunk, recallRoomMessage } from './api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -77,5 +77,40 @@ describe('room API client', () => {
 
     const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers)
     expect(headers.get('X-Ciphertext-SHA256')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  })
+
+  it('sends a device-bound recall credential and validates the tombstone', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000001'
+    const deviceId = '00000000-0000-4000-8000-000000000002'
+    const fetchMock = vi.fn().mockResolvedValue(
+      Response.json(
+        {
+          data: {
+            duplicate: false,
+            event: {
+              type: 'recall',
+              messageId,
+              senderId: deviceId,
+              sequence: 2,
+              recalledAt: 1,
+            },
+          },
+        },
+        { status: 201 },
+      ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(
+      recallRoomMessage('locator', 'room-token', deviceId, messageId, 'A'.repeat(43)),
+    ).resolves.toMatchObject({ event: { type: 'recall', messageId, senderId: deviceId } })
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/rooms/locator/messages/${messageId}/recall`,
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer room-token' }),
+        body: JSON.stringify({ deviceId, recallToken: 'A'.repeat(43) }),
+      }),
+    )
   })
 })

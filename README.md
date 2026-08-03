@@ -14,14 +14,15 @@ SecretGram is a deployable reference implementation, not an independently audite
 - Separate HKDF-derived values for room routing, server authentication, and message encryption
 - Per-sending-session message keys with monotonic AES-GCM nonces
 - Idempotent message submission with message-ID and sender-counter conflict detection
+- Capability-authorized message recall with ordered tombstones for history and live peers
 - Real-time WebSocket delivery with one-time tickets, history catch-up, reconnects, and HTTP fallback
 - Client-side chunked encryption for images, PDFs, and arbitrary files
 - Idempotent encrypted chunk retries with ciphertext digest conflict detection
-- Browser-local image and PDF previews created from decrypted Blob URLs
+- Browser-local image and PDF previews created from decrypted Blob URLs and a bundled PDF.js worker
 - Durable Object SQLite for room ordering and state; R2 for encrypted file chunks
 - Logical expiration on read paths plus alarm-driven physical cleanup
 - Layered per-source, per-device, and room-wide rate limits and storage quotas
-- Responsive interface with no external fonts, analytics scripts, or icon CDN
+- Accessible day/night interface with pasted-file queuing and no external fonts, analytics scripts, or icon CDN
 
 ## Architecture
 
@@ -154,4 +155,4 @@ wrangler.jsonc        Cloudflare bindings, migrations, and policy defaults
 
 ## License
 
-No license has been selected. Treat the source as all rights reserved until the repository owner adds one.
+SecretGram is released under the [MIT License](LICENSE).

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type KeyboardEvent } from 'react'
 
 import { createRoom, getRoomInfo } from '../lib/api'
 import { createMessageSender } from '../lib/message-crypto'
@@ -14,6 +14,8 @@ import { SecurityDialog } from './SecurityDialog'
 interface AccessScreenProps {
   initialRoomCode?: string
   onSession: (session: ActiveRoomSession) => void
+  theme: 'day' | 'night'
+  onToggleTheme: () => void
 }
 
 type AccessMode = 'join' | 'create'
@@ -28,13 +30,41 @@ function codeFromInput(input: string): string {
   return decodeURIComponent(params.get('room') ?? fragment)
 }
 
-export function AccessScreen({ initialRoomCode = '', onSession }: AccessScreenProps) {
+function roomLifetimeLabel(ttlSeconds: number): string {
+  if (ttlSeconds === 24 * 60 * 60) return '24 hours'
+  if (ttlSeconds === 7 * 24 * 60 * 60) return '7 days'
+  return '30 days'
+}
+
+export function AccessScreen({
+  initialRoomCode = '',
+  onSession,
+  theme,
+  onToggleTheme,
+}: AccessScreenProps) {
   const [mode, setMode] = useState<AccessMode>('join')
   const [roomCode, setRoomCode] = useState(initialRoomCode)
   const [ttlSeconds, setTtlSeconds] = useState(7 * 24 * 60 * 60)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [showSecurity, setShowSecurity] = useState(false)
+  const roomCodeDescription = error && mode === 'join' ? 'room-code-help access-error' : 'room-code-help'
+  const roomLifetime = roomLifetimeLabel(ttlSeconds)
+
+  function selectMode(nextMode: AccessMode) {
+    setMode(nextMode)
+    setError('')
+  }
+
+  function handleTabKey(event: KeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    const nextMode = mode === 'join' ? 'create' : 'join'
+    selectMode(nextMode)
+    window.requestAnimationFrame(() => {
+      document.getElementById(`${nextMode}-room-tab`)?.focus()
+    })
+  }
 
   async function joinRoom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -102,9 +132,19 @@ export function AccessScreen({ initialRoomCode = '', onSession }: AccessScreenPr
           <span className="brand-mark" aria-hidden="true">SG</span>
           <span>SecretGram</span>
         </div>
-        <button className="text-button" type="button" onClick={() => setShowSecurity(true)}>
-          Security details
-        </button>
+        <div className="product-actions">
+          <button
+            className="text-button"
+            type="button"
+            aria-label={`Switch to ${theme === 'night' ? 'day' : 'night'} theme`}
+            onClick={onToggleTheme}
+          >
+            {theme === 'night' ? 'Day theme' : 'Night theme'}
+          </button>
+          <button className="text-button" type="button" onClick={() => setShowSecurity(true)}>
+            Security details
+          </button>
+        </div>
       </header>
 
       <section className="access-panel" aria-labelledby="access-title">
@@ -114,39 +154,58 @@ export function AccessScreen({ initialRoomCode = '', onSession }: AccessScreenPr
           <p>No account required. The room code grants access and decryption; share it only through a trusted channel.</p>
         </div>
 
+        <div className="access-controls">
         <div className="tabs" role="tablist" aria-label="Room actions">
           <button
+            id="join-room-tab"
             type="button"
             role="tab"
             aria-selected={mode === 'join'}
+            aria-controls="join-room-panel"
             className={mode === 'join' ? 'tab active' : 'tab'}
-            onClick={() => { setMode('join'); setError('') }}
+            onClick={() => selectMode('join')}
+            onKeyDown={handleTabKey}
           >
             Join room
           </button>
           <button
+            id="create-room-tab"
             type="button"
             role="tab"
             aria-selected={mode === 'create'}
+            aria-controls="create-room-panel"
             className={mode === 'create' ? 'tab active' : 'tab'}
-            onClick={() => { setMode('create'); setError('') }}
+            onClick={() => selectMode('create')}
+            onKeyDown={handleTabKey}
           >
             Create room
           </button>
         </div>
 
         {mode === 'join' ? (
-          <form className="access-form" onSubmit={joinRoom} noValidate>
+          <form
+            id="join-room-panel"
+            className="access-form"
+            role="tabpanel"
+            aria-labelledby="join-room-tab"
+            onSubmit={joinRoom}
+            noValidate
+            aria-busy={busy}
+          >
             <label htmlFor="room-code">Room code or invitation link</label>
             <input
               id="room-code"
               value={roomCode}
-              onChange={(event) => setRoomCode(event.target.value)}
+              onChange={(event) => {
+                setRoomCode(event.target.value)
+                setError('')
+              }}
               autoComplete="off"
               autoCapitalize="characters"
+              inputMode="text"
               spellCheck={false}
               placeholder="e.g. ABCD-EFGH-JK…"
-              aria-describedby="room-code-help"
+              aria-describedby={roomCodeDescription}
               aria-invalid={error ? true : undefined}
               autoFocus
             />
@@ -158,31 +217,46 @@ export function AccessScreen({ initialRoomCode = '', onSession }: AccessScreenPr
             </button>
           </form>
         ) : (
-          <div className="access-form" role="tabpanel">
+          <form
+            id="create-room-panel"
+            className="access-form"
+            role="tabpanel"
+            aria-labelledby="create-room-tab"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void createSecureRoom()
+            }}
+            aria-busy={busy}
+          >
             <label htmlFor="room-retention">Room lifetime</label>
             <select
               id="room-retention"
               value={ttlSeconds}
+              disabled={busy}
               onChange={(event) => setTtlSeconds(Number(event.target.value))}
             >
               <option value={24 * 60 * 60}>24 hours</option>
               <option value={7 * 24 * 60 * 60}>7 days</option>
               <option value={30 * 24 * 60 * 60}>30 days</option>
             </select>
-            <p className="field-help">Messages are retained for up to seven days. At room expiration, all encrypted server data becomes inaccessible and enters cleanup.</p>
-            <button className="primary-button" type="button" disabled={busy} onClick={createSecureRoom}>
+            <p className="field-help">
+              This room expires after {roomLifetime}. Messages are retained for up to seven days, or until the room
+              expires if sooner.
+            </p>
+            <button className="primary-button" type="submit" disabled={busy}>
               {busy ? 'Creating…' : 'Create secure room'}
             </button>
-          </div>
+          </form>
         )}
 
-        {error && <p className="form-error" role="alert">{error}</p>}
+        {error && <p className="form-error" id="access-error" role="alert">{error}</p>}
 
         <div className="trust-strip">
           <span className="status-dot secure" aria-hidden="true" />
           <span>Content encrypted on this device</span>
           <span aria-hidden="true">·</span>
           <span>Server handles ciphertext only</span>
+        </div>
         </div>
       </section>
 

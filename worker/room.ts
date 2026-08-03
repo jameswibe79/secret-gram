@@ -5,6 +5,8 @@ import {
   webSocketClientFrameSchema,
   type ClientMessageEnvelope,
   type StoredMessageEnvelope,
+  type StoredRecallEvent,
+  type StoredRoomEvent,
 } from '../src/shared/protocol'
 
 const BASE64URL_256_PATTERN = /^[A-Za-z0-9_-]{43}$/u
@@ -15,6 +17,8 @@ const MAX_RETAINED_MESSAGE_CHARACTERS = 256 * 1024 * 1024
 const MAX_ROOM_UPLOADS = 128
 const MAX_PENDING_UPLOADS = 32
 const MAX_ROOM_FILE_CHUNKS = 4_096
+const MESSAGE_COLUMNS =
+  'sequence, id, sender_id, sender_epoch_id, message_counter, server_created_at, ciphertext, event_type, recall_verifier, recalled_message_id, recalled_at'
 
 function errorType(error: unknown): string {
   return error instanceof Error ? error.name : 'UnknownError'
@@ -54,6 +58,10 @@ interface MessageRow extends Record<string, SqlStorageValue> {
   message_counter: number
   server_created_at: number
   ciphertext: string
+  event_type: 'message' | 'recall'
+  recall_verifier: string | null
+  recalled_message_id: string | null
+  recalled_at: number | null
 }
 
 interface RoomUsageRow extends Record<string, SqlStorageValue> {
@@ -83,8 +91,17 @@ export type AppendMessageResult =
         | 'capacity'
     }
 
+export type RecallMessageResult =
+  | { ok: true; duplicate: boolean; event: StoredRecallEvent }
+  | {
+      ok: false
+      duplicate: false
+      event: null
+      reason: RoomFailureReason | 'invalid' | 'forbidden' | 'not_recallable'
+    }
+
 export type MessageHistoryResult =
-  | { ok: true; messages: StoredMessageEnvelope[] }
+  | { ok: true; messages: StoredRoomEvent[] }
   | { ok: false; messages: []; reason: RoomFailureReason | 'invalid' }
 
 interface BeginUploadInput {
@@ -196,6 +213,10 @@ export class RoomDurableObject extends DurableObject<Env> {
         message_counter INTEGER NOT NULL,
         server_created_at INTEGER NOT NULL,
         ciphertext TEXT NOT NULL,
+        event_type TEXT NOT NULL DEFAULT 'message' CHECK (event_type IN ('message', 'recall')),
+        recall_verifier TEXT,
+        recalled_message_id TEXT,
+        recalled_at INTEGER,
         UNIQUE (sender_epoch_id, message_counter)
       );
       CREATE INDEX IF NOT EXISTS messages_server_created_at
@@ -258,6 +279,10 @@ export class RoomDurableObject extends DurableObject<Env> {
               message_counter INTEGER NOT NULL,
               server_created_at INTEGER NOT NULL,
               ciphertext TEXT NOT NULL,
+              event_type TEXT NOT NULL DEFAULT 'message' CHECK (event_type IN ('message', 'recall')),
+              recall_verifier TEXT,
+              recalled_message_id TEXT,
+              recalled_at INTEGER,
               UNIQUE (sender_epoch_id, message_counter)
             );
             CREATE INDEX messages_server_created_at ON messages(server_created_at);
@@ -276,6 +301,25 @@ export class RoomDurableObject extends DurableObject<Env> {
       })
     }
 
+    const recallColumns = this.ctx.storage.sql
+      .exec<TableInfoRow>('PRAGMA table_info(messages)')
+      .toArray()
+      .map((column) => column.name)
+    if (!recallColumns.includes('event_type')) {
+      this.ctx.storage.transactionSync(() => {
+        this.ctx.storage.sql.exec(
+          "ALTER TABLE messages ADD COLUMN event_type TEXT NOT NULL DEFAULT 'message'",
+        )
+        this.ctx.storage.sql.exec('ALTER TABLE messages ADD COLUMN recall_verifier TEXT')
+        this.ctx.storage.sql.exec('ALTER TABLE messages ADD COLUMN recalled_message_id TEXT')
+        this.ctx.storage.sql.exec('ALTER TABLE messages ADD COLUMN recalled_at INTEGER')
+        this.ctx.storage.sql.exec(
+          'INSERT OR IGNORE INTO _sql_schema_migrations (id, applied_at) VALUES (4, ?)',
+          Date.now(),
+        )
+      })
+    }
+
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS room_usage (
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -287,6 +331,10 @@ export class RoomDurableObject extends DurableObject<Env> {
       INSERT OR IGNORE INTO _sql_schema_migrations (id, applied_at)
       VALUES (3, unixepoch() * 1000);
     `)
+    this.ctx.storage.sql.exec(
+      'INSERT OR IGNORE INTO _sql_schema_migrations (id, applied_at) VALUES (4, ?)',
+      Date.now(),
+    )
   }
 
   private room(): RoomRow | null {
@@ -345,6 +393,12 @@ export class RoomDurableObject extends DurableObject<Env> {
     return crypto.subtle.timingSafeEqual(actual, expected)
   }
 
+  private async recallTokenDigest(token: string): Promise<Uint8Array<ArrayBuffer> | null> {
+    const tokenBytes = decodeBase64Url(token)
+    if (tokenBytes === null || tokenBytes.byteLength !== 32) return null
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', tokenBytes))
+  }
+
   private async authorizationFailure(token: string): Promise<RoomFailureReason | null> {
     const row = this.room()
     if (row === null) return 'not_found'
@@ -362,6 +416,21 @@ export class RoomDurableObject extends DurableObject<Env> {
       serverCreatedAt: row.server_created_at,
       sequence: row.sequence,
       ciphertext: row.ciphertext,
+      ...(row.recall_verifier === null ? {} : { recallVerifier: row.recall_verifier }),
+    }
+  }
+
+  private storedEvent(row: MessageRow): StoredRoomEvent {
+    if (row.event_type === 'message') return this.storedMessage(row)
+    if (row.recalled_message_id === null || row.recalled_at === null) {
+      throw new Error('Stored recall event is incomplete')
+    }
+    return {
+      type: 'recall',
+      messageId: row.recalled_message_id,
+      senderId: row.sender_id,
+      sequence: row.sequence,
+      recalledAt: row.recalled_at,
     }
   }
 
@@ -539,19 +608,23 @@ export class RoomDurableObject extends DurableObject<Env> {
 
     const existing = this.ctx.storage.sql
       .exec<MessageRow>(
-        `SELECT sequence, id, sender_id, sender_epoch_id, message_counter,
-                server_created_at, ciphertext
-         FROM messages WHERE id = ?`,
+        `SELECT ${MESSAGE_COLUMNS}
+         FROM messages
+         WHERE id = ? OR recalled_message_id = ?
+         ORDER BY sequence DESC LIMIT 1`,
+        parsed.data.id,
         parsed.data.id,
       )
       .toArray()[0]
 
     if (existing !== undefined) {
       if (
+        existing.event_type !== 'message' ||
         existing.sender_id !== parsed.data.senderId ||
         existing.sender_epoch_id !== parsed.data.senderEpochId ||
         existing.message_counter !== parsed.data.counter ||
-        existing.ciphertext !== parsed.data.ciphertext
+        existing.ciphertext !== parsed.data.ciphertext ||
+        (existing.recall_verifier ?? undefined) !== parsed.data.recallVerifier
       ) {
         return {
           ok: false,
@@ -607,8 +680,9 @@ export class RoomDurableObject extends DurableObject<Env> {
       const row = this.ctx.storage.sql
         .exec<{ sequence: number } & Record<string, SqlStorageValue>>(
         `INSERT INTO messages
-         (id, sender_id, sender_epoch_id, message_counter, server_created_at, ciphertext)
-         VALUES (?, ?, ?, ?, ?, ?)
+         (id, sender_id, sender_epoch_id, message_counter, server_created_at, ciphertext,
+          recall_verifier)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          RETURNING sequence`,
         parsed.data.id,
         parsed.data.senderId,
@@ -616,6 +690,7 @@ export class RoomDurableObject extends DurableObject<Env> {
         parsed.data.counter,
         serverCreatedAt,
         parsed.data.ciphertext,
+        parsed.data.recallVerifier ?? null,
         )
         .one()
       this.ctx.storage.sql.exec(
@@ -651,6 +726,97 @@ export class RoomDurableObject extends DurableObject<Env> {
     return this.storeMessage(deviceId, envelope)
   }
 
+  async recallMessage(
+    token: string,
+    deviceId: string,
+    messageId: string,
+    recallToken: string,
+  ): Promise<RecallMessageResult> {
+    const authFailure = await this.authorizationFailure(token)
+    if (authFailure !== null) {
+      return { ok: false, duplicate: false, event: null, reason: authFailure }
+    }
+    if (
+      !UUID_PATTERN.test(deviceId) ||
+      !UUID_PATTERN.test(messageId) ||
+      !BASE64URL_256_PATTERN.test(recallToken)
+    ) {
+      return { ok: false, duplicate: false, event: null, reason: 'invalid' }
+    }
+
+    const actualVerifier = await this.recallTokenDigest(recallToken)
+    if (actualVerifier === null) {
+      return { ok: false, duplicate: false, event: null, reason: 'invalid' }
+    }
+    const row = this.ctx.storage.sql
+      .exec<MessageRow>(
+        `SELECT ${MESSAGE_COLUMNS}
+         FROM messages
+         WHERE id = ? OR recalled_message_id = ?
+         ORDER BY sequence DESC LIMIT 1`,
+        messageId,
+        messageId,
+      )
+      .toArray()[0]
+    if (row === undefined) {
+      return { ok: false, duplicate: false, event: null, reason: 'not_found' }
+    }
+    if (row.sender_id !== deviceId) {
+      return { ok: false, duplicate: false, event: null, reason: 'forbidden' }
+    }
+    const expectedVerifier = row.recall_verifier === null
+      ? null
+      : decodeBase64Url(row.recall_verifier)
+    if (expectedVerifier === null || expectedVerifier.byteLength !== 32) {
+      return { ok: false, duplicate: false, event: null, reason: 'not_recallable' }
+    }
+    if (!crypto.subtle.timingSafeEqual(actualVerifier, expectedVerifier)) {
+      return { ok: false, duplicate: false, event: null, reason: 'forbidden' }
+    }
+    if (row.event_type === 'recall') {
+      return { ok: true, duplicate: true, event: this.storedEvent(row) as StoredRecallEvent }
+    }
+
+    const recalledAt = Date.now()
+    const eventId = crypto.randomUUID()
+    const eventEpochId = encodeBase64Url(crypto.getRandomValues(new Uint8Array(16)))
+    const inserted = this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec('DELETE FROM messages WHERE id = ?', messageId)
+      const eventRow = this.ctx.storage.sql
+        .exec<{ sequence: number } & Record<string, SqlStorageValue>>(
+          `INSERT INTO messages
+           (id, sender_id, sender_epoch_id, message_counter, server_created_at, ciphertext,
+            event_type, recall_verifier, recalled_message_id, recalled_at)
+           VALUES (?, ?, ?, 0, ?, '', 'recall', ?, ?, ?)
+           RETURNING sequence`,
+          eventId,
+          row.sender_id,
+          eventEpochId,
+          recalledAt,
+          row.recall_verifier,
+          messageId,
+          recalledAt,
+        )
+        .one()
+      this.ctx.storage.sql.exec(
+        `UPDATE room_usage SET
+           message_characters = MAX(0, message_characters - ?)
+         WHERE singleton = 1`,
+        row.ciphertext.length,
+      )
+      return eventRow
+    })
+    const event: StoredRecallEvent = {
+      type: 'recall',
+      messageId,
+      senderId: row.sender_id,
+      sequence: inserted.sequence,
+      recalledAt,
+    }
+    this.broadcast(event)
+    return { ok: true, duplicate: false, event }
+  }
+
   async getMessages(
     token: string,
     afterSequence: number,
@@ -669,8 +835,7 @@ export class RoomDurableObject extends DurableObject<Env> {
     const authFailure = await this.authorizationFailure(token)
     if (authFailure !== null) return { ok: false, messages: [], reason: authFailure }
 
-    const columns =
-      'sequence, id, sender_id, sender_epoch_id, message_counter, server_created_at, ciphertext'
+    const columns = MESSAGE_COLUMNS
     const retentionCutoff = Date.now() - Number(this.env.MESSAGE_RETENTION_SECONDS) * 1_000
     const rows = this.ctx.storage.sql
       .exec<MessageRow>(
@@ -682,7 +847,7 @@ export class RoomDurableObject extends DurableObject<Env> {
       )
       .toArray()
 
-    return { ok: true, messages: rows.map((row) => this.storedMessage(row)) }
+    return { ok: true, messages: rows.map((row) => this.storedEvent(row)) }
   }
 
   async beginUpload(

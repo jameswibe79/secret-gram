@@ -109,7 +109,12 @@ describe('SecretGram Worker API', () => {
   it('supports authenticated message history and one-time socket ticket creation', async () => {
     const room = await createRoomViaApi()
     const deviceId = crypto.randomUUID()
-    const message = envelope(deviceId)
+    const recallTokenBytes = crypto.getRandomValues(new Uint8Array(32))
+    const recallToken = bytesToBase64Url(recallTokenBytes)
+    const message = {
+      ...envelope(deviceId),
+      recallVerifier: await sha256Base64Url(recallTokenBytes),
+    }
 
     const posted = await api(`/api/v1/rooms/${room.locator}/messages`, {
       method: 'POST',
@@ -131,6 +136,36 @@ describe('SecretGram Worker API', () => {
     expect(history.status).toBe(200)
     await expect(history.json()).resolves.toMatchObject({
       data: { messages: [{ ...message, sequence: 1 }] },
+    })
+
+    const recalled = await api(
+      `/api/v1/rooms/${room.locator}/messages/${message.id}/recall`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${room.token}`,
+          'Content-Type': 'application/json',
+          Origin: 'https://secret-gram.test',
+        },
+        body: JSON.stringify({ deviceId, recallToken }),
+      },
+    )
+    expect(recalled.status).toBe(201)
+    await expect(recalled.json()).resolves.toMatchObject({
+      data: {
+        duplicate: false,
+        event: { type: 'recall', messageId: message.id, senderId: deviceId, sequence: 2 },
+      },
+    })
+
+    const recalledHistory = await api(
+      `/api/v1/rooms/${room.locator}/messages?after=0&limit=50`,
+      { headers: { Authorization: `Bearer ${room.token}` } },
+    )
+    await expect(recalledHistory.json()).resolves.toMatchObject({
+      data: {
+        messages: [{ type: 'recall', messageId: message.id, senderId: deviceId, sequence: 2 }],
+      },
     })
 
     const ticket = await api(`/api/v1/rooms/${room.locator}/socket-ticket`, {

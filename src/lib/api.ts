@@ -3,8 +3,15 @@ import { z, type ZodType } from 'zod'
 import type {
   ClientMessageEnvelope,
   StoredMessageEnvelope,
+  StoredRecallEvent,
+  StoredRoomEvent,
 } from '../shared/protocol'
-import { storedMessageEnvelopeSchema, timestampMillisecondsSchema } from '../shared/protocol'
+import {
+  storedMessageEnvelopeSchema,
+  storedRecallEventSchema,
+  storedRoomEventSchema,
+  timestampMillisecondsSchema,
+} from '../shared/protocol'
 import { bytesToBase64Url } from './encoding'
 
 interface ApiSuccess<T> {
@@ -35,10 +42,14 @@ const createRoomResultSchema = z.strictObject({
   created: z.boolean(),
   expiresAt: timestampMillisecondsSchema,
 })
-const messageHistorySchema = z.strictObject({ messages: z.array(storedMessageEnvelopeSchema) })
+const messageHistorySchema = z.strictObject({ messages: z.array(storedRoomEventSchema) })
 const postedMessageSchema = z.strictObject({
   duplicate: z.boolean(),
   message: storedMessageEnvelopeSchema,
+})
+const recalledMessageSchema = z.strictObject({
+  duplicate: z.boolean(),
+  event: storedRecallEventSchema,
 })
 const socketTicketResultSchema = z.strictObject({
   ticket: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
@@ -166,7 +177,7 @@ export async function getRoomMessages(
   after = 0,
   limit = 50,
   signal?: AbortSignal,
-): Promise<StoredMessageEnvelope[]> {
+): Promise<StoredRoomEvent[]> {
   const query = new URLSearchParams({ after: String(after), limit: String(limit) })
   const result = await requestJson(
     `${roomPath(locator)}/messages?${query.toString()}`,
@@ -194,6 +205,31 @@ export function postRoomMessage(
     body: { deviceId, envelope },
     signal,
   })
+}
+
+export interface RecalledMessageResult {
+  duplicate: boolean
+  event: StoredRecallEvent
+}
+
+export function recallRoomMessage(
+  locator: string,
+  token: string,
+  deviceId: string,
+  messageId: string,
+  recallToken: string,
+  signal?: AbortSignal,
+): Promise<RecalledMessageResult> {
+  return requestJson(
+    `${roomPath(locator)}/messages/${encodeURIComponent(messageId)}/recall`,
+    recalledMessageSchema,
+    {
+      method: 'POST',
+      token,
+      body: { deviceId, recallToken },
+      signal,
+    },
+  )
 }
 
 export interface SocketTicketResult {

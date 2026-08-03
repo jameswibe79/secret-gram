@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { FileDescriptor } from '../shared/protocol'
 import {
   downloadDecryptedFile,
   type FileTransferCredentials,
 } from '../lib/file-transfer'
+import { SecurityDialog } from './SecurityDialog'
+import { PdfPreview } from './PdfPreview'
 
 interface AttachmentProps {
   descriptor: FileDescriptor
@@ -39,11 +41,14 @@ function safeDownloadName(name: string): string {
 
 export function Attachment({ descriptor, credentials }: AttachmentProps) {
   const [objectUrl, setObjectUrl] = useState('')
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null)
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [error, setError] = useState('')
   const abortRef = useRef<AbortController | null>(null)
   const blobPromiseRef = useRef<Promise<Blob> | null>(null)
+  const previewBlobRef = useRef<Blob | null>(null)
   const objectUrlRef = useRef('')
   const mountedRef = useRef(true)
   const previewType = useMemo(() => {
@@ -60,10 +65,11 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
       abortRef.current?.abort()
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
       objectUrlRef.current = ''
+      previewBlobRef.current = null
     }
   }, [])
 
-  async function getBlob(): Promise<Blob> {
+  const getBlob = useCallback(async (): Promise<Blob> => {
     if (blobPromiseRef.current) return blobPromiseRef.current
 
     const controller = new AbortController()
@@ -99,7 +105,7 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
       if (abortRef.current === controller) abortRef.current = null
       if (mountedRef.current) setLoading(false)
     }
-  }
+  }, [credentials, descriptor])
 
   async function download() {
     let temporaryUrl = false
@@ -125,40 +131,78 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
     }
   }
 
-  async function preview() {
+  const ensurePreviewUrl = useCallback(async (): Promise<string> => {
+    if (objectUrlRef.current && previewBlobRef.current) return objectUrlRef.current
+    const blob = previewBlobRef.current ?? await getBlob()
+    if (!mountedRef.current) throw new DOMException('Operation canceled', 'AbortError')
+    previewBlobRef.current = blob
+    setPreviewBlob(blob)
+    if (objectUrlRef.current) return objectUrlRef.current
+    const nextUrl = URL.createObjectURL(blob)
+    objectUrlRef.current = nextUrl
+    setObjectUrl(nextUrl)
+    return nextUrl
+  }, [getBlob])
+
+  async function openPreview() {
     try {
-      if (objectUrlRef.current) return
-      const blob = await getBlob()
-      if (!mountedRef.current || objectUrlRef.current) return
-      const nextUrl = URL.createObjectURL(blob)
-      objectUrlRef.current = nextUrl
-      setObjectUrl(nextUrl)
+      await ensurePreviewUrl()
+      if (mountedRef.current) setPreviewOpen(true)
     } catch {
       // The inline error gives the user the recovery state.
     }
   }
 
+  useEffect(() => {
+    if (previewType === 'none') return
+    let stopped = false
+    void ensurePreviewUrl().catch(() => {
+      if (stopped || !mountedRef.current) return
+      void ensurePreviewUrl().catch(() => {
+        // The inline error gives the user the recovery state.
+      })
+    })
+    return () => {
+      stopped = true
+    }
+  }, [ensurePreviewUrl, previewType])
+
   return (
     <section className="attachment" aria-label={`Attachment: ${descriptor.name}`}>
-      <div className="attachment-summary">
-        <span className="file-glyph" aria-hidden="true">
-          {previewType === 'image' ? 'IMG' : previewType === 'pdf' ? 'PDF' : 'FILE'}
-        </span>
-        <div className="attachment-name">
-          <strong>{descriptor.name}</strong>
-          <span>{fileSize(descriptor.size)} · encrypted attachment</span>
+      <div className={previewType === 'none' ? 'attachment-card' : 'attachment-card has-preview'}>
+        <div className="attachment-details">
+          <div className="attachment-summary">
+            <span className="file-glyph" aria-hidden="true">
+              {previewType === 'image' ? 'IMG' : previewType === 'pdf' ? 'PDF' : 'FILE'}
+            </span>
+            <div className="attachment-name">
+              <strong>{descriptor.name}</strong>
+              <span>{fileSize(descriptor.size)} · encrypted attachment</span>
+            </div>
+          </div>
+          <div className="attachment-actions">
+            <button type="button" className="small-button" disabled={loading} onClick={download}>
+              Download
+            </button>
+          </div>
         </div>
-      </div>
-
-      <div className="attachment-actions">
-        {previewType !== 'none' && !objectUrl && (
-          <button type="button" className="small-button" disabled={loading} onClick={preview}>
-            Preview
+        {previewType !== 'none' && (
+          <button
+            type="button"
+            className="preview-thumb"
+            disabled={loading}
+            aria-label={`Open ${descriptor.name} preview`}
+            onClick={openPreview}
+          >
+            {previewType === 'image' && objectUrl ? (
+              <img src={objectUrl} alt="" />
+            ) : previewType === 'pdf' && previewBlob ? (
+              <PdfPreview data={previewBlob} name={descriptor.name} compact />
+            ) : (
+              <span>{previewType === 'image' ? 'IMG' : 'PDF'}</span>
+            )}
           </button>
         )}
-        <button type="button" className="small-button" disabled={loading} onClick={download}>
-          Download
-        </button>
       </div>
 
       {loading && (
@@ -169,20 +213,28 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
       )}
       {error && <p className="inline-error" role="alert">{error}</p>}
 
-      {objectUrl && previewType === 'image' && (
-        <div className="image-preview">
-          <img src={objectUrl} alt={descriptor.name} />
-        </div>
-      )}
-      {objectUrl && previewType === 'pdf' && (
-        <div className="pdf-preview">
-          <iframe
-            src={objectUrl}
-            title={`${descriptor.name} PDF preview`}
-            sandbox=""
-            referrerPolicy="no-referrer"
-          />
-        </div>
+      {previewOpen && objectUrl && previewBlob && (
+        <SecurityDialog
+          title={descriptor.name}
+          backdropClassName="preview-backdrop"
+          className="preview-modal"
+          onClose={() => setPreviewOpen(false)}
+        >
+          <div className="preview-toolbar">
+            <span>{previewType === 'image' ? 'Image preview' : 'PDF preview'}</span>
+            <a href={objectUrl} target="_blank" rel="noopener noreferrer">
+              {previewType === 'image' ? 'Open full size' : 'Open in new tab'}
+            </a>
+          </div>
+          {previewType === 'image' && (
+            <div className="modal-image-preview">
+              <img src={objectUrl} alt={descriptor.name} />
+            </div>
+          )}
+          {previewType === 'pdf' && (
+            <PdfPreview data={previewBlob} name={descriptor.name} />
+          )}
+        </SecurityDialog>
       )}
       {previewType === 'none' && descriptor.size > PREVIEW_LIMIT_BYTES && (
         <p className="attachment-note">To limit memory use, attachments larger than 64 MB can only be downloaded.</p>
