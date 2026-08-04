@@ -542,6 +542,54 @@
   line-height: 1.55;
 }
 
+.join-method-callout {
+  position: relative;
+  padding: 14px 15px;
+  margin: 0 0 21px;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, var(--accent-soft), transparent 72%),
+    var(--surface-raised);
+  border: 1px solid var(--accent-border);
+  border-left: 4px solid var(--accent);
+  border-radius: 14px 14px 14px 5px;
+  box-shadow: var(--shadow-small);
+}
+
+.join-method-callout > strong {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text);
+  font-family: var(--serif);
+  font-size: 14px;
+}
+
+.join-method-callout dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.join-method-callout dl > div {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+
+.join-method-callout dt {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.join-method-callout dd {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .primary-button,
 .send-button {
   min-height: 48px;

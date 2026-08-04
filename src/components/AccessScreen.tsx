@@ -308,6 +308,23 @@ export function AccessScreen({
               This room expires after {roomLifetime}. Messages are retained for up to seven days, or until the room
               expires if sooner.
             </p>
+            <aside
+              className="join-method-callout"
+              role="note"
+              aria-label="How participants join"
+            >
+              <strong>How participants join</strong>
+              <dl>
+                <div>
+                  <dt>No password</dt>
+                  <dd>Share the full invitation link. The six-character Room ID alone will not work.</dd>
+                </div>
+                <div>
+                  <dt>With a password</dt>
+                  <dd>Share the Room ID and password separately.</dd>
+                </div>
+              </dl>
+            </aside>
             <label htmlFor="create-room-password">Optional room password</label>
             <input
               id="create-room-password"
@@ -335,10 +352,6 @@ export function AccessScreen({
               autoComplete="new-password"
               placeholder={createPassword === '' ? 'Not needed without a password' : 'Re-enter room password'}
             />
-            <p className="field-help">
-              Without a password, participants must use the full invitation link. Password rooms
-              can be joined with the six-character room ID and password.
-            </p>
             <button className="primary-button" type="submit" disabled={busy}>
               {busy ? 'Creating…' : 'Create secure room'}
             </button>

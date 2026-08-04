@@ -110,6 +110,14 @@ describe('SecretGram application', () => {
     await user.keyboard('{ArrowRight}')
     await waitFor(() => expect(screen.getByRole('tab', { name: 'Create room' })).toHaveFocus())
     expect(screen.getByRole('heading', { name: 'Create an encrypted room' })).toBeInTheDocument()
+    const joinMethod = screen.getByRole('note', { name: 'How participants join' })
+    expect(joinMethod).toBeInTheDocument()
+    expect(screen.getByText('No password')).toBeInTheDocument()
+    expect(screen.getByText(
+      'Share the full invitation link. The six-character Room ID alone will not work.',
+    )).toBeInTheDocument()
+    expect(screen.getByText('With a password')).toBeInTheDocument()
+    expect(screen.getByText('Share the Room ID and password separately.')).toBeInTheDocument()
 
     const lifetime = screen.getByLabelText('Room lifetime')
     await user.selectOptions(lifetime, String(24 * 60 * 60))
