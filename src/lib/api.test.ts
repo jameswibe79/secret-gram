@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, getRoomInfo, putEncryptedChunk, recallRoomMessage } from './api'
+import {
+  ApiError,
+  getRoomInfo,
+  getRoomPin,
+  putEncryptedChunk,
+  recallRoomMessage,
+  setRoomPin,
+} from './api'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -110,6 +117,28 @@ describe('room API client', () => {
         method: 'POST',
         headers: expect.objectContaining({ Authorization: 'Bearer room-token' }),
         body: JSON.stringify({ deviceId, recallToken: 'A'.repeat(43) }),
+      }),
+    )
+  })
+
+  it('validates pin state and sends idempotent pin updates', async () => {
+    const messageId = '00000000-0000-4000-8000-000000000001'
+    const pin = { messageId, version: 3, updatedAt: 1 }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(Response.json({ data: { pin } }))
+      .mockResolvedValueOnce(Response.json({ data: { duplicate: false, pin } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(getRoomPin('locator', 'room-token')).resolves.toEqual(pin)
+    await expect(
+      setRoomPin('locator', 'room-token', messageId, true),
+    ).resolves.toEqual({ duplicate: false, pin })
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      `/api/v1/rooms/locator/messages/${messageId}/pin`,
+      expect.objectContaining({
+        method: 'PUT',
+        headers: expect.objectContaining({ Authorization: 'Bearer room-token' }),
+        body: JSON.stringify({ pinned: true }),
       }),
     )
   })

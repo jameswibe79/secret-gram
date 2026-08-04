@@ -42,6 +42,8 @@ const recallMessageSchema = z
   .object({ deviceId: deviceIdSchema, recallToken: recallTokenSchema })
   .strict()
 
+const pinMessageSchema = z.object({ pinned: z.boolean() }).strict()
+
 const socketTicketSchema = z.object({ deviceId: deviceIdSchema }).strict()
 
 const beginUploadSchema = z
@@ -209,6 +211,33 @@ async function route(request: Request, env: Env, requestId: string): Promise<Res
       result.duplicate ? 200 : 201,
       requestId,
     )
+  }
+
+  const pinStateMatch =
+    /^\/api\/v1\/rooms\/([A-Za-z0-9_-]{43})\/pin$/u.exec(url.pathname)
+  if (pinStateMatch !== null && request.method === 'GET') {
+    await enforceRateLimit(request, env, 'room-pin', 120, 60)
+    const token = bearerToken(request)
+    const result = await env.ROOMS.getByName(pinStateMatch[1]).getPin(token)
+    if (!result.ok) throw roomFailure(result.reason)
+    return successResponse({ pin: result.pin }, 200, requestId)
+  }
+
+  const pinMessageMatch =
+    /^\/api\/v1\/rooms\/([A-Za-z0-9_-]{43})\/messages\/([0-9a-f-]{36})\/pin$/iu.exec(
+      url.pathname,
+    )
+  if (pinMessageMatch !== null && request.method === 'PUT') {
+    await enforceRateLimit(request, env, 'message-pin', 60, 60)
+    const token = bearerToken(request)
+    const input = await parseJson(request, pinMessageSchema)
+    const result = await env.ROOMS.getByName(pinMessageMatch[1]).setPin(
+      token,
+      pinMessageMatch[2],
+      input.pinned,
+    )
+    if (!result.ok) throw roomFailure(result.reason)
+    return successResponse({ duplicate: result.duplicate, pin: result.pin }, 200, requestId)
   }
 
   const recallMatch =

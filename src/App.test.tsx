@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,8 +8,10 @@ import {
   createSocketTicket,
   getRoomInfo,
   getRoomMessages,
+  getRoomPin,
   postRoomMessage,
   recallRoomMessage,
+  setRoomPin,
 } from './lib/api'
 import { uploadEncryptedFile } from './lib/file-transfer'
 import { generateRoomKey } from './lib/room-crypto'
@@ -22,8 +24,10 @@ vi.mock('./lib/api', async (importOriginal) => {
     createSocketTicket: vi.fn(),
     getRoomInfo: vi.fn(),
     getRoomMessages: vi.fn(),
+    getRoomPin: vi.fn(),
     postRoomMessage: vi.fn(),
     recallRoomMessage: vi.fn(),
+    setRoomPin: vi.fn(),
   }
 })
 
@@ -43,6 +47,11 @@ beforeEach(() => {
     onlineCount: 1,
   })
   vi.mocked(getRoomMessages).mockReset().mockResolvedValue([])
+  vi.mocked(getRoomPin).mockReset().mockResolvedValue({
+    messageId: null,
+    version: 0,
+    updatedAt: null,
+  })
   vi.mocked(createSocketTicket).mockReset().mockRejectedValue(new Error('offline in test'))
   vi.mocked(postRoomMessage).mockReset().mockImplementation(
     async (_locator, _token, _deviceId, envelope) => ({
@@ -59,6 +68,17 @@ beforeEach(() => {
         senderId: deviceId,
         sequence: 2,
         recalledAt: Date.now(),
+      },
+    }),
+  )
+  let pinVersion = 0
+  vi.mocked(setRoomPin).mockReset().mockImplementation(
+    async (_locator, _token, messageId, pinned) => ({
+      duplicate: false,
+      pin: {
+        messageId: pinned ? messageId : null,
+        version: ++pinVersion,
+        updatedAt: Date.now(),
       },
     }),
   )
@@ -222,6 +242,46 @@ describe('SecretGram application', () => {
     expect(await screen.findByText('Message recalled')).toBeInTheDocument()
     expect(screen.queryByText('Please remove this')).not.toBeInTheDocument()
     expect(screen.getByText('Recalled for everyone')).toBeInTheDocument()
+  })
+
+  it('pins, unpins, and clears a recalled room message', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Create room' }))
+    await user.click(screen.getByRole('button', { name: 'Create secure room' }))
+    await screen.findByRole('heading', { name: 'Secure room' })
+
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Keep this in view')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.click(await screen.findByRole('button', { name: 'Pin' }))
+
+    await waitFor(() => expect(setRoomPin).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      true,
+    ))
+    const banner = await screen.findByLabelText('Pinned message')
+    expect(banner).toHaveTextContent('Keep this in view')
+
+    await user.click(within(banner).getByRole('button', { name: 'Unpin' }))
+    await waitFor(() => expect(setRoomPin).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.any(String),
+      false,
+    ))
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Pinned message')).not.toBeInTheDocument()
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Pin' }))
+    await screen.findByLabelText('Pinned message')
+    await user.click(screen.getByRole('button', { name: 'Recall' }))
+    await user.click(screen.getByRole('button', { name: 'Recall for everyone' }))
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Pinned message')).not.toBeInTheDocument()
+    })
   })
 
   it('joins from a secure short link and clears the path after leaving', async () => {

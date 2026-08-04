@@ -106,7 +106,7 @@ describe('SecretGram Worker API', () => {
     await expect(response.json()).resolves.toMatchObject({ error: { code: 'cross_origin' } })
   })
 
-  it('supports authenticated message history and one-time socket ticket creation', async () => {
+  it('supports authenticated history, pinning, recall, and socket tickets', async () => {
     const room = await createRoomViaApi()
     const deviceId = crypto.randomUUID()
     const recallTokenBytes = crypto.getRandomValues(new Uint8Array(32))
@@ -138,6 +138,32 @@ describe('SecretGram Worker API', () => {
       data: { messages: [{ ...message, sequence: 1 }] },
     })
 
+    const pinned = await api(
+      `/api/v1/rooms/${room.locator}/messages/${message.id}/pin`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${room.token}`,
+          'Content-Type': 'application/json',
+          Origin: 'https://secret-gram.test',
+        },
+        body: JSON.stringify({ pinned: true }),
+      },
+    )
+    expect(pinned.status).toBe(200)
+    await expect(pinned.json()).resolves.toMatchObject({
+      data: {
+        duplicate: false,
+        pin: { messageId: message.id, version: 1 },
+      },
+    })
+
+    const pinState = await api(`/api/v1/rooms/${room.locator}/pin`, {
+      headers: { Authorization: `Bearer ${room.token}` },
+    })
+    await expect(pinState.json()).resolves.toMatchObject({
+      data: { pin: { messageId: message.id, version: 1 } },
+    })
     const recalled = await api(
       `/api/v1/rooms/${room.locator}/messages/${message.id}/recall`,
       {
@@ -166,6 +192,13 @@ describe('SecretGram Worker API', () => {
       data: {
         messages: [{ type: 'recall', messageId: message.id, senderId: deviceId, sequence: 2 }],
       },
+    })
+
+    const clearedPin = await api(`/api/v1/rooms/${room.locator}/pin`, {
+      headers: { Authorization: `Bearer ${room.token}` },
+    })
+    await expect(clearedPin.json()).resolves.toMatchObject({
+      data: { pin: { messageId: null, version: 2 } },
     })
 
     const ticket = await api(`/api/v1/rooms/${room.locator}/socket-ticket`, {

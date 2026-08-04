@@ -15,6 +15,7 @@ SecretGram is a deployable reference implementation, not an independently audite
 - Per-sending-session message keys with monotonic AES-GCM nonces
 - Idempotent message submission with message-ID and sender-counter conflict detection
 - Capability-authorized message recall with ordered tombstones for history and live peers
+- One room-wide pinned message synchronized across live peers and reconnects
 - Real-time WebSocket delivery with one-time tickets, history catch-up, reconnects, and HTTP fallback
 - Client-side chunked encryption for images, PDFs, and arbitrary files
 - Idempotent encrypted chunk retries with ciphertext digest conflict detection

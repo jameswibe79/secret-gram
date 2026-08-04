@@ -99,10 +99,14 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     messages,
     status,
     onlineCount,
+    pinnedMessageId,
+    pinningMessageId,
+    pinError,
     connectionError,
     sendPlainMessage,
     retryMessage,
     recallMessage,
+    updatePin,
   } = useRoomChannel(session)
   const [draft, setDraft] = useState('')
   const [senderName, setSenderName] = useState(`Guest ${session.deviceId.slice(0, 4).toUpperCase()}`)
@@ -127,6 +131,13 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
       deviceId: session.deviceId,
     }),
     [session.authToken, session.deviceId, session.locator],
+  )
+
+  const pinnedMessage = useMemo(
+    () => messages.find((message) =>
+      message.id === pinnedMessageId &&
+      message.recalledAt === undefined) ?? null,
+    [messages, pinnedMessageId],
   )
 
   useEffect(() => {
@@ -478,6 +489,39 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
 
       <section className={isDraggingFiles ? 'workspace is-dragging' : 'workspace'}>
         <div className="timeline" aria-label="Encrypted messages">
+          {pinnedMessage !== null && (
+            <aside className="pinned-message" aria-label="Pinned message">
+              <span className="pinned-mark">Pinned</span>
+              <button
+                type="button"
+                className="pinned-summary"
+                onClick={() => {
+                  document.getElementById(`message-${pinnedMessage.id}`)?.scrollIntoView({
+                    block: 'center',
+                    behavior: 'smooth',
+                  })
+                }}
+              >
+                <strong>{pinnedMessage.content?.senderName ?? 'Unverified sender'}</strong>
+                <span>
+                  {pinnedMessage.content?.kind === 'text'
+                    ? pinnedMessage.content.text
+                    : pinnedMessage.content?.kind === 'file'
+                      ? `Attachment: ${pinnedMessage.content.file.name}`
+                      : 'Message could not be verified'}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="inline-button pinned-remove"
+                disabled={pinningMessageId !== null}
+                onClick={() => void updatePin(pinnedMessage.id, false)}
+              >
+                {pinningMessageId === pinnedMessage.id ? 'Unpinning…' : 'Unpin'}
+              </button>
+            </aside>
+          )}
+          {pinError && <p className="pin-error" role="alert">{pinError}</p>}
           {messages.length === 0 && (
             <div className="empty-state">
               <span className="empty-illustration" aria-hidden="true"><i /></span>
@@ -499,7 +543,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
             const displayTimestamp =
               message.recalledAt ?? content?.clientCreatedAt ?? message.serverCreatedAt ?? Date.now()
             return (
-              <article className={own ? 'message own' : 'message'} key={message.id}>
+              <article
+                className={`${own ? 'message own' : 'message'}${pinnedMessageId === message.id ? ' is-pinned' : ''}`}
+                id={`message-${message.id}`}
+                key={message.id}
+              >
                 <div className="message-meta">
                   <strong>
                     {content?.senderName ?? (recalled ? own ? 'You' : 'A participant' : 'Unverified sender')}
@@ -526,6 +574,18 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
                   {!recalled && message.delivery === 'stored' && (
                     <>
                       <span>Ciphertext stored by server</span>
+                      {content !== null && (
+                        <button
+                          type="button"
+                          className="inline-button pin-button"
+                          disabled={pinningMessageId !== null}
+                          onClick={() => void updatePin(message.id, pinnedMessageId !== message.id)}
+                        >
+                          {pinningMessageId === message.id
+                            ? pinnedMessageId === message.id ? 'Unpinning…' : 'Pinning…'
+                            : pinnedMessageId === message.id ? 'Unpin' : 'Pin'}
+                        </button>
+                      )}
                       {own && message.recallToken !== undefined && (
                         <button
                           type="button"

@@ -2,11 +2,13 @@ import { z, type ZodType } from 'zod'
 
 import type {
   ClientMessageEnvelope,
+  RoomPinState,
   StoredMessageEnvelope,
   StoredRecallEvent,
   StoredRoomEvent,
 } from '../shared/protocol'
 import {
+  roomPinStateSchema,
   storedMessageEnvelopeSchema,
   storedRecallEventSchema,
   storedRoomEventSchema,
@@ -27,7 +29,7 @@ interface ApiFailure {
 }
 
 interface JsonRequestOptions {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PUT'
   token?: string
   body?: unknown
   signal?: AbortSignal
@@ -50,6 +52,11 @@ const postedMessageSchema = z.strictObject({
 const recalledMessageSchema = z.strictObject({
   duplicate: z.boolean(),
   event: storedRecallEventSchema,
+})
+const roomPinResultSchema = z.strictObject({ pin: roomPinStateSchema })
+const updatedRoomPinSchema = z.strictObject({
+  duplicate: z.boolean(),
+  pin: roomPinStateSchema,
 })
 const socketTicketResultSchema = z.strictObject({
   ticket: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
@@ -227,6 +234,41 @@ export function recallRoomMessage(
       method: 'POST',
       token,
       body: { deviceId, recallToken },
+      signal,
+    },
+  )
+}
+
+export function getRoomPin(
+  locator: string,
+  token: string,
+  signal?: AbortSignal,
+): Promise<RoomPinState> {
+  return requestJson(`${roomPath(locator)}/pin`, roomPinResultSchema, {
+    token,
+    signal,
+  }).then((result) => result.pin)
+}
+
+export interface UpdatedRoomPinResult {
+  duplicate: boolean
+  pin: RoomPinState
+}
+
+export function setRoomPin(
+  locator: string,
+  token: string,
+  messageId: string,
+  pinned: boolean,
+  signal?: AbortSignal,
+): Promise<UpdatedRoomPinResult> {
+  return requestJson(
+    `${roomPath(locator)}/messages/${encodeURIComponent(messageId)}/pin`,
+    updatedRoomPinSchema,
+    {
+      method: 'PUT',
+      token,
+      body: { pinned },
       signal,
     },
   )

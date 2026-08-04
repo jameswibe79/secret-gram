@@ -72,6 +72,12 @@ export const storedRecallEventSchema = z.strictObject({
   recalledAt: timestampMillisecondsSchema,
 })
 
+export const roomPinStateSchema = z.strictObject({
+  messageId: uuidSchema.nullable(),
+  version: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  updatedAt: timestampMillisecondsSchema.nullable(),
+})
+
 export const storedRoomEventSchema = z.union([
   storedMessageEnvelopeSchema,
   storedRecallEventSchema,
@@ -103,6 +109,7 @@ export const webSocketServerFrameSchema = z.discriminatedUnion('type', [
     sequence: z.number().int().positive(),
     recalledAt: timestampMillisecondsSchema,
   }),
+  z.strictObject({ type: z.literal('pin'), pin: roomPinStateSchema }),
   z.strictObject({ type: z.literal('pong'), at: timestampMillisecondsSchema }),
   z.strictObject({
     type: z.literal('error'),
@@ -116,6 +123,7 @@ export type PlainMessage = z.infer<typeof plainMessageSchema>
 export type ClientMessageEnvelope = z.infer<typeof clientMessageEnvelopeSchema>
 export type StoredMessageEnvelope = z.infer<typeof storedMessageEnvelopeSchema>
 export type StoredRecallEvent = z.infer<typeof storedRecallEventSchema>
+export type RoomPinState = z.infer<typeof roomPinStateSchema>
 export type StoredRoomEvent = z.infer<typeof storedRoomEventSchema>
 export type WebSocketClientFrame = z.infer<typeof webSocketClientFrameSchema>
 export type WebSocketServerFrame = z.infer<typeof webSocketServerFrameSchema>

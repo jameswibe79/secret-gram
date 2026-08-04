@@ -64,6 +64,9 @@ The protocol does not ratchet keys. A room secret obtained later can derive mess
 
 Display names, device UUIDs, and left/right message placement are presentation data, not cryptographic identities. Any participant with the room code can claim another display name. Verify people and room codes through an independent channel.
 
+Message pinning is authorized only by the shared room credential. Any participant who can enter the
+room can replace or clear its single pin; pin actions do not prove a human identity.
+
 ### Recall is not remote erasure
 
 Message recall removes the retained ciphertext from the room and distributes an ordered tombstone to active and reconnecting clients. It cannot erase plaintext that a recipient already copied, downloaded, screenshotted, cached outside the application, or observed through a compromised endpoint.
@@ -72,7 +75,7 @@ Recall authorization uses a random capability generated with the message. Its ve
 
 ### Metadata visibility
 
-Cloudflare and the operator can observe IP addresses, timing, request paths, room locators, message ordering, ciphertext length, file chunk counts and sizes, connection counts, and operational logs. Traffic analysis may reveal relationships or content categories even without plaintext.
+Cloudflare and the operator can observe IP addresses, timing, request paths, room locators, message ordering, pinned message IDs and update times, ciphertext length, file chunk counts and sizes, connection counts, and operational logs. Traffic analysis may reveal relationships or content categories even without plaintext.
 
 For stronger metadata protection, use an appropriate network anonymity layer and consider padding/batching. Neither is implemented here.
 
@@ -148,6 +151,7 @@ Current structured error logs contain event type, request ID, method/path, and e
 - Expired rooms are rejected logically before physical cleanup.
 - Message history enforces the configured retention cutoff.
 - Hourly alarms remove stale message rows and abandoned uploads.
+- A pin stores only message metadata, does not extend retention, and clears when its message is recalled or expires.
 - Room expiration removes the room's R2 prefix and SQLite data.
 - Failed R2 cleanup is rescheduled.
 - A bucket lifecycle rule should delete orphaned ciphertext independently.

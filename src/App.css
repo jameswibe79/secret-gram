@@ -969,6 +969,77 @@ button:disabled {
   scrollbar-gutter: stable;
 }
 
+.pinned-message {
+  position: sticky;
+  z-index: 3;
+  top: -18px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: min(820px, 100%);
+  min-height: 54px;
+  padding: 9px 14px;
+  margin: -10px auto 26px;
+  background: color-mix(in srgb, var(--panel-surface-strong) 92%, transparent);
+  border: 1px solid var(--accent-border);
+  border-radius: 15px;
+  box-shadow: var(--shadow-small);
+  backdrop-filter: blur(12px);
+}
+
+.pinned-mark {
+  padding: 4px 8px;
+  color: var(--accent);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+
+.pinned-summary {
+  min-width: 0;
+  padding: 0;
+  text-align: left;
+}
+
+.pinned-summary strong,
+.pinned-summary span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-summary strong {
+  margin-bottom: 2px;
+  color: var(--text);
+  font-size: 10px;
+}
+
+.pinned-summary span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.pinned-remove {
+  padding: 5px 8px;
+}
+
+.pin-error {
+  width: min(820px, 100%);
+  padding: 8px 12px;
+  margin: -14px auto 18px;
+  color: var(--danger);
+  font-size: 10px;
+  text-align: center;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: 10px;
+}
+
 .empty-state {
   max-width: 440px;
   margin: clamp(52px, 10vh, 110px) auto;
@@ -1116,6 +1187,11 @@ button:disabled {
   border-radius: 20px 7px 20px 20px;
 }
 
+.message.is-pinned .message-body {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft), var(--shadow-small);
+}
+
 .message-body.recalled {
   color: var(--text-muted);
   background: var(--surface-subtle);
@@ -1149,6 +1225,10 @@ button:disabled {
 }
 
 .recall-button {
+  margin-left: 4px;
+}
+
+.pin-button {
   margin-left: 4px;
 }
 
@@ -2185,6 +2265,18 @@ progress {
 
   .timeline {
     padding: 20px 12px 30px;
+  }
+
+  .pinned-message {
+    top: -10px;
+    gap: 8px;
+    padding-inline: 10px;
+    margin-top: -10px;
+    margin-bottom: 20px;
+  }
+
+  .pinned-mark {
+    display: none;
   }
 
   .message {

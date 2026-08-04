@@ -4,6 +4,7 @@ import {
   clientMessageEnvelopeSchema,
   webSocketClientFrameSchema,
   type ClientMessageEnvelope,
+  type RoomPinState,
   type StoredMessageEnvelope,
   type StoredRecallEvent,
   type StoredRoomEvent,
@@ -69,6 +70,12 @@ interface RoomUsageRow extends Record<string, SqlStorageValue> {
   message_characters: number
 }
 
+interface PinRow extends Record<string, SqlStorageValue> {
+  message_id: string | null
+  version: number
+  updated_at: number | null
+}
+
 interface TableInfoRow extends Record<string, SqlStorageValue> {
   name: string
 }
@@ -98,6 +105,19 @@ export type RecallMessageResult =
       duplicate: false
       event: null
       reason: RoomFailureReason | 'invalid' | 'forbidden' | 'not_recallable'
+    }
+
+export type GetRoomPinResult =
+  | { ok: true; pin: RoomPinState }
+  | { ok: false; pin: null; reason: RoomFailureReason }
+
+export type SetRoomPinResult =
+  | { ok: true; duplicate: boolean; pin: RoomPinState }
+  | {
+      ok: false
+      duplicate: false
+      pin: null
+      reason: RoomFailureReason | 'invalid' | 'not_found'
     }
 
 export type MessageHistoryResult =
@@ -245,6 +265,14 @@ export class RoomDurableObject extends DurableObject<Env> {
         expires_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS socket_tickets_expires_at ON socket_tickets(expires_at);
+      CREATE TABLE IF NOT EXISTS room_pin_state (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        message_id TEXT,
+        version INTEGER NOT NULL CHECK (version >= 0),
+        updated_at INTEGER
+      );
+      INSERT OR IGNORE INTO room_pin_state (singleton, message_id, version, updated_at)
+      VALUES (1, NULL, 0, NULL);
       CREATE TABLE IF NOT EXISTS message_rate_windows (
         device_id TEXT PRIMARY KEY,
         window_start INTEGER NOT NULL,
@@ -335,6 +363,10 @@ export class RoomDurableObject extends DurableObject<Env> {
       'INSERT OR IGNORE INTO _sql_schema_migrations (id, applied_at) VALUES (4, ?)',
       Date.now(),
     )
+    this.ctx.storage.sql.exec(
+      'INSERT OR IGNORE INTO _sql_schema_migrations (id, applied_at) VALUES (5, ?)',
+      Date.now(),
+    )
   }
 
   private room(): RoomRow | null {
@@ -362,6 +394,50 @@ export class RoomDurableObject extends DurableObject<Env> {
     return row ?? null
   }
 
+  private pinRow(): PinRow {
+    return this.ctx.storage.sql
+      .exec<PinRow>(
+        'SELECT message_id, version, updated_at FROM room_pin_state WHERE singleton = 1',
+      )
+      .one()
+  }
+
+  private roomPin(row: PinRow = this.pinRow()): RoomPinState {
+    return {
+      messageId: row.message_id,
+      version: row.version,
+      updatedAt: row.updated_at,
+    }
+  }
+
+  private writePin(messageId: string | null, updatedAt: number): RoomPinState {
+    const row = this.ctx.storage.sql
+      .exec<PinRow>(
+        `UPDATE room_pin_state
+         SET message_id = ?, version = version + 1, updated_at = ?
+         WHERE singleton = 1
+         RETURNING message_id, version, updated_at`,
+        messageId,
+        updatedAt,
+      )
+      .one()
+    return this.roomPin(row)
+  }
+
+  private clearPinForMessage(messageId: string, updatedAt: number): RoomPinState | null {
+    const row = this.ctx.storage.sql
+      .exec<PinRow>(
+        `UPDATE room_pin_state
+         SET message_id = NULL, version = version + 1, updated_at = ?
+         WHERE singleton = 1 AND message_id = ?
+         RETURNING message_id, version, updated_at`,
+        updatedAt,
+        messageId,
+      )
+      .toArray()[0]
+    return row === undefined ? null : this.roomPin(row)
+  }
+
   private deleteMessagesBefore(cutoff: number): void {
     const expiredCount = this.ctx.storage.sql
       .exec<{ count: number } & Record<string, SqlStorageValue>>(
@@ -371,7 +447,18 @@ export class RoomDurableObject extends DurableObject<Env> {
       .one().count
     if (expiredCount === 0) return
 
-    this.ctx.storage.transactionSync(() => {
+    const currentPin = this.pinRow()
+    const pinnedMessageExpires = currentPin.message_id !== null && this.ctx.storage.sql
+      .exec<{ found: number } & Record<string, SqlStorageValue>>(
+        'SELECT 1 AS found FROM messages WHERE id = ? AND server_created_at < ?',
+        currentPin.message_id,
+        cutoff,
+      )
+      .toArray()[0] !== undefined
+    const clearedPin = this.ctx.storage.transactionSync(() => {
+      const cleared = pinnedMessageExpires && currentPin.message_id !== null
+        ? this.clearPinForMessage(currentPin.message_id, Date.now())
+        : null
       this.ctx.storage.sql.exec('DELETE FROM messages WHERE server_created_at < ?', cutoff)
       this.ctx.storage.sql.exec(
         `UPDATE room_usage SET
@@ -381,7 +468,9 @@ export class RoomDurableObject extends DurableObject<Env> {
            )
          WHERE singleton = 1`,
       )
+      return cleared
     })
+    if (clearedPin !== null) this.broadcast({ type: 'pin', pin: clearedPin })
   }
 
   private async isAuthorized(token: string, row: RoomRow): Promise<boolean> {
@@ -804,17 +893,94 @@ export class RoomDurableObject extends DurableObject<Env> {
          WHERE singleton = 1`,
         row.ciphertext.length,
       )
-      return eventRow
+      return {
+        eventRow,
+        clearedPin: this.clearPinForMessage(messageId, recalledAt),
+      }
     })
     const event: StoredRecallEvent = {
       type: 'recall',
       messageId,
       senderId: row.sender_id,
-      sequence: inserted.sequence,
+      sequence: inserted.eventRow.sequence,
       recalledAt,
+    }
+    if (inserted.clearedPin !== null) {
+      this.broadcast({ type: 'pin', pin: inserted.clearedPin })
     }
     this.broadcast(event)
     return { ok: true, duplicate: false, event }
+  }
+
+  async getPin(token: string): Promise<GetRoomPinResult> {
+    const authFailure = await this.authorizationFailure(token)
+    if (authFailure !== null) return { ok: false, pin: null, reason: authFailure }
+
+    const pin = this.roomPin()
+    if (pin.messageId === null) return { ok: true, pin }
+
+    const retentionCutoff = Date.now() - Number(this.env.MESSAGE_RETENTION_SECONDS) * 1_000
+    const pinnedMessage = this.ctx.storage.sql
+      .exec<{ id: string } & Record<string, SqlStorageValue>>(
+        `SELECT id FROM messages
+         WHERE id = ? AND event_type = 'message' AND server_created_at >= ?`,
+        pin.messageId,
+        retentionCutoff,
+      )
+      .toArray()[0]
+    if (pinnedMessage !== undefined) return { ok: true, pin }
+
+    const clearedPin = this.writePin(null, Date.now())
+    this.broadcast({ type: 'pin', pin: clearedPin })
+    return { ok: true, pin: clearedPin }
+  }
+
+  async setPin(
+    token: string,
+    messageId: string,
+    pinned: boolean,
+  ): Promise<SetRoomPinResult> {
+    const authFailure = await this.authorizationFailure(token)
+    if (authFailure !== null) {
+      return { ok: false, duplicate: false, pin: null, reason: authFailure }
+    }
+    if (!UUID_PATTERN.test(messageId) || typeof pinned !== 'boolean') {
+      return { ok: false, duplicate: false, pin: null, reason: 'invalid' }
+    }
+
+    const current = this.roomPin()
+    if (!pinned) {
+      if (current.messageId !== messageId) {
+        return { ok: true, duplicate: true, pin: current }
+      }
+      const pin = this.writePin(null, Date.now())
+      this.broadcast({ type: 'pin', pin })
+      return { ok: true, duplicate: false, pin }
+    }
+
+    const retentionCutoff = Date.now() - Number(this.env.MESSAGE_RETENTION_SECONDS) * 1_000
+    const message = this.ctx.storage.sql
+      .exec<{ id: string } & Record<string, SqlStorageValue>>(
+        `SELECT id FROM messages
+         WHERE id = ? AND event_type = 'message' AND server_created_at >= ?`,
+        messageId,
+        retentionCutoff,
+      )
+      .toArray()[0]
+    if (message === undefined) {
+      if (current.messageId === messageId) {
+        const pin = this.writePin(null, Date.now())
+        this.broadcast({ type: 'pin', pin })
+      }
+      return { ok: false, duplicate: false, pin: null, reason: 'not_found' }
+    }
+    if (current.messageId === messageId) {
+      return { ok: true, duplicate: true, pin: current }
+    }
+
+    const pin = this.writePin(messageId, Date.now())
+    this.broadcast({ type: 'pin', pin })
+    return { ok: true, duplicate: false, pin }
   }
 
   async getMessages(

@@ -39,6 +39,7 @@ One Durable Object is addressed deterministically per room locator. It coordinat
 - monotonically increasing message sequence numbers;
 - message idempotency and nonce-context conflict checks;
 - history pages;
+- versioned room-wide pinned-message state;
 - one-time WebSocket tickets and hibernatable sockets;
 - upload manifests and chunk state;
 - maintenance alarms and room cleanup.
@@ -102,6 +103,21 @@ New messages also receive a random 256-bit recall capability. Its SHA-256 verifi
 
 Recall is a server-retention operation, not guaranteed erasure from recipients. A recipient may already have copied, downloaded, screenshotted, or otherwise retained decrypted content. Leaving or reloading the sending tab discards its in-memory recall capabilities, so that browser can no longer recall earlier messages. Messages created before recall verifiers were introduced are not recallable.
 
+## Message pinning
+
+A room has at most one pinned retained message. Any participant with the shared room credential
+can pin a message, replace the current pin, or clear it; pinning does not authenticate the person
+performing the action.
+
+The Durable Object stores only the pinned message ID, a monotonic state version, and the update
+timestamp. Clients fetch this state during initial and post-WebSocket history synchronization, then
+apply versioned WebSocket updates so a delayed HTTP response cannot overwrite newer state. Pin
+updates are idempotent, and an unpin request names its expected message so it cannot clear a newer
+replacement pin.
+
+Pinning never extends ciphertext retention. Recalling the pinned message or deleting it at the
+retention cutoff atomically clears the pin before the change is broadcast.
+
 This protocol does not implement a Double Ratchet, sender authentication signatures, forward secrecy, or post-compromise security.
 
 ## Message delivery
@@ -115,6 +131,7 @@ This protocol does not implement a Double Ratchet, sender authentication signatu
 7. The Durable Object persists before broadcasting and acknowledging.
 8. Reconnect uses sequence-based history catch-up and drains every page before flushing pending messages.
 9. Recall events use the same ordered history and WebSocket stream, replacing message content with a tombstone on every connected client.
+10. Pin state is fetched alongside catch-up and updated through versioned WebSocket frames.
 
 Server acknowledgement means only that ciphertext was stored. It is not a recipient read or delivery receipt.
 

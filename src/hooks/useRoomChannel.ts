@@ -4,15 +4,18 @@ import {
   ApiError,
   createSocketTicket,
   getRoomMessages,
+  getRoomPin,
   postRoomMessage,
   recallRoomMessage,
   roomWebSocketUrl,
+  setRoomPin,
 } from '../lib/api'
 import { createRecallCredential, decryptMessage, encryptMessage } from '../lib/message-crypto'
 import type { ActiveRoomSession } from '../lib/session'
 import {
   webSocketServerFrameSchema,
   type ClientMessageEnvelope,
+  type RoomPinState,
   type PlainMessage,
   type StoredMessageEnvelope,
   type StoredRecallEvent,
@@ -98,16 +101,28 @@ export function useRoomChannel(session: ActiveRoomSession) {
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [onlineCount, setOnlineCount] = useState(0)
   const [connectionError, setConnectionError] = useState('')
+  const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null)
+  const [pinningMessageId, setPinningMessageId] = useState<string | null>(null)
+  const [pinError, setPinError] = useState('')
   const socketRef = useRef<WebSocket | null>(null)
   const pendingRef = useRef(new Map<string, PendingMessage>())
   const ackTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
   const maxSequenceRef = useRef(0)
+  const pinVersionRef = useRef(0)
+  const pinnedMessageIdRef = useRef<string | null>(null)
 
   const settlePending = useCallback((id: string) => {
     pendingRef.current.delete(id)
     const timer = ackTimersRef.current.get(id)
     if (timer !== undefined) clearTimeout(timer)
     ackTimersRef.current.delete(id)
+  }, [])
+
+  const applyPin = useCallback((pin: RoomPinState) => {
+    if (pin.version < pinVersionRef.current) return
+    pinVersionRef.current = pin.version
+    pinnedMessageIdRef.current = pin.messageId
+    setPinnedMessageId(pin.messageId)
   }, [])
 
   const applyStored = useCallback(
@@ -141,6 +156,11 @@ export function useRoomChannel(session: ActiveRoomSession) {
     (event: StoredRecallEvent) => {
       maxSequenceRef.current = Math.max(maxSequenceRef.current, event.sequence)
       settlePending(event.messageId)
+      if (pinnedMessageIdRef.current === event.messageId) {
+        pinnedMessageIdRef.current = null
+        pinVersionRef.current += 1
+        setPinnedMessageId(null)
+      }
       setMessages((current) =>
         mergeTimeline(current, {
           id: event.messageId,
@@ -221,6 +241,16 @@ export function useRoomChannel(session: ActiveRoomSession) {
       () => stopped,
     )
 
+    const syncRoom = async () => {
+      await syncHistory()
+      const pin = await getRoomPin(
+        session.locator,
+        session.authToken,
+        lifecycle.signal,
+      )
+      if (!stopped) applyPin(pin)
+    }
+
     const flushPending = async () => {
       for (const pending of [...pendingRef.current.values()]) {
         if (stopped) return
@@ -251,7 +281,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
       setStatus(reconnectAttempt === 0 ? 'connecting' : 'reconnecting')
       setConnectionError('')
       try {
-        await syncHistory()
+        await syncRoom()
         const ticket = await createSocketTicket(
           session.locator,
           session.authToken,
@@ -274,7 +304,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
           setStatus('connected')
           void (async () => {
             try {
-              await syncHistory()
+              await syncRoom()
               if (!stopped && socket.readyState === WebSocket.OPEN) await flushPending()
             } catch {
               setConnectionError('History synchronization failed. Reconnecting…')
@@ -316,6 +346,8 @@ export function useRoomChannel(session: ActiveRoomSession) {
             void applyStored(frame.message)
           } else if (frame.type === 'recall') {
             applyRecall(frame)
+          } else if (frame.type === 'pin') {
+            applyPin(frame.pin)
           } else if (frame.type === 'ack') {
             settlePending(frame.id)
             setMessages((current) => {
@@ -421,6 +453,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
     }
   }, [
     applyEvent,
+    applyPin,
     applyRecall,
     applyStored,
     postPending,
@@ -492,6 +525,28 @@ export function useRoomChannel(session: ActiveRoomSession) {
     [messages, postPending],
   )
 
+  const updatePin = useCallback(
+    async (id: string, pinned: boolean) => {
+      if (pinningMessageId !== null) return
+      setPinningMessageId(id)
+      setPinError('')
+      try {
+        const result = await setRoomPin(
+          session.locator,
+          session.authToken,
+          id,
+          pinned,
+        )
+        applyPin(result.pin)
+      } catch (error) {
+        setPinError(error instanceof Error ? error.message : 'Message pin update failed.')
+      } finally {
+        setPinningMessageId((current) => current === id ? null : current)
+      }
+    },
+    [applyPin, pinningMessageId, session.authToken, session.locator],
+  )
+
   const recallMessage = useCallback(
     async (id: string) => {
       const message = messages.find((candidate) => candidate.id === id)
@@ -537,9 +592,13 @@ export function useRoomChannel(session: ActiveRoomSession) {
     messages,
     status,
     onlineCount,
+    pinnedMessageId,
+    pinningMessageId,
+    pinError,
     connectionError,
     sendPlainMessage,
     retryMessage,
     recallMessage,
+    updatePin,
   }
 }

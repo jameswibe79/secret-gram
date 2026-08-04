@@ -49,9 +49,10 @@ Run a scheduled synthetic test with non-sensitive generated content:
 2. create and authenticate the room;
 3. obtain and consume a WebSocket ticket;
 4. send one encrypted message and verify sequence/acknowledgement;
-5. fetch history and decrypt locally;
-6. upload two encrypted test chunks, complete the upload, download them, and verify local integrity;
-7. allow the synthetic room to expire or explicitly track it until cleanup.
+5. pin it, verify the versioned pin state over HTTP and WebSocket, then clear it;
+6. fetch history and decrypt locally;
+7. upload two encrypted test chunks, complete the upload, download them, and verify local integrity;
+8. allow the synthetic room to expire or explicitly track it until cleanup.
 
 Never reuse production user room codes. Tag synthetic monitoring through an out-of-band operator record, not plaintext inside the encrypted service.
 
@@ -176,7 +177,7 @@ Never log room codes, fragments, bearer tokens, tickets, request bodies, ciphert
 4. Run `npx wrangler deploy --dry-run` and inspect bindings.
 5. Deploy through the approved production identity.
 6. Record Worker version and build inputs.
-7. Verify health, headers, two-browser text, WebSocket, image, PDF, and generic file flows.
+7. Verify health, headers, two-browser text, pin/replace/unpin synchronization, WebSocket, image, PDF, and generic file flows.
 8. Monitor errors and cleanup events through the observation window.
 
 ## Rollback

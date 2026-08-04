@@ -195,6 +195,113 @@ describe('RoomDurableObject authentication', () => {
     expect(history.messages).toEqual([recalled.event])
   })
 
+  it('keeps one versioned pin and clears it on recall', async () => {
+    const locator = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+    const auth = await authFixture()
+    const recall = await authFixture()
+    const room = roomStub(locator)
+    const senderId = crypto.randomUUID()
+    const first = { ...envelope(senderId), recallVerifier: recall.verifier }
+    const second = envelope(senderId)
+    await room.initialize({ locator, authVerifier: auth.verifier, ttlSeconds: 3_600 })
+    await room.appendMessage(auth.token, senderId, first)
+    await room.appendMessage(auth.token, senderId, second)
+
+    await expect(room.getPin(auth.token)).resolves.toEqual({
+      ok: true,
+      pin: { messageId: null, version: 0, updatedAt: null },
+    })
+    const pinned = await room.setPin(auth.token, first.id, true)
+    expect(pinned).toMatchObject({
+      ok: true,
+      duplicate: false,
+      pin: { messageId: first.id, version: 1 },
+    })
+    await expect(room.setPin(auth.token, first.id, true)).resolves.toEqual({
+      ...pinned,
+      duplicate: true,
+    })
+    await expect(room.setPin(auth.token, second.id, true)).resolves.toMatchObject({
+      ok: true,
+      duplicate: false,
+      pin: { messageId: second.id, version: 2 },
+    })
+    await expect(room.setPin(auth.token, first.id, false)).resolves.toMatchObject({
+      ok: true,
+      duplicate: true,
+      pin: { messageId: second.id, version: 2 },
+    })
+    await expect(room.setPin(auth.token, second.id, false)).resolves.toMatchObject({
+      ok: true,
+      duplicate: false,
+      pin: { messageId: null, version: 3 },
+    })
+
+    await room.setPin(auth.token, first.id, true)
+    await room.recallMessage(auth.token, senderId, first.id, recall.token)
+    await expect(room.getPin(auth.token)).resolves.toMatchObject({
+      ok: true,
+      pin: { messageId: null, version: 5 },
+    })
+    await expect(room.setPin(auth.token, first.id, true)).resolves.toMatchObject({
+      ok: false,
+      reason: 'not_found',
+    })
+  })
+
+  it('adds pin state when opening an existing room schema', async () => {
+    const locator = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+    const auth = await authFixture()
+    const room = roomStub(locator)
+    const now = Date.now()
+    await runInDurableObject(room, (_instance, state) => {
+      state.storage.sql.exec(`
+        CREATE TABLE room (
+          singleton INTEGER PRIMARY KEY,
+          locator TEXT NOT NULL,
+          auth_verifier TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+        CREATE TABLE messages (
+          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+          id TEXT NOT NULL UNIQUE,
+          sender_id TEXT NOT NULL,
+          sender_epoch_id TEXT NOT NULL,
+          message_counter INTEGER NOT NULL,
+          server_created_at INTEGER NOT NULL,
+          ciphertext TEXT NOT NULL,
+          event_type TEXT NOT NULL DEFAULT 'message',
+          recall_verifier TEXT,
+          recalled_message_id TEXT,
+          recalled_at INTEGER,
+          UNIQUE (sender_epoch_id, message_counter)
+        );
+        CREATE TABLE upload_chunks (
+          file_id TEXT NOT NULL,
+          chunk_index INTEGER NOT NULL,
+          encrypted_size INTEGER NOT NULL,
+          etag TEXT NOT NULL,
+          ciphertext_sha256 TEXT NOT NULL,
+          PRIMARY KEY (file_id, chunk_index)
+        );
+      `)
+      state.storage.sql.exec(
+        `INSERT INTO room (singleton, locator, auth_verifier, created_at, expires_at)
+         VALUES (1, ?, ?, ?, ?)`,
+        locator,
+        auth.verifier,
+        now,
+        now + 3_600_000,
+      )
+    })
+
+    await expect(room.getPin(auth.token)).resolves.toEqual({
+      ok: true,
+      pin: { messageId: null, version: 0, updatedAt: null },
+    })
+  })
+
   it('paginates retained history from the oldest message without gaps', async () => {
     const locator = bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)))
     const auth = await authFixture()
@@ -222,8 +329,10 @@ describe('RoomDurableObject authentication', () => {
     const room = roomStub(locator)
     const senderId = crypto.randomUUID()
     await room.initialize({ locator, authVerifier: auth.verifier, ttlSeconds: 86_400 })
-    const stored = await room.appendMessage(auth.token, senderId, envelope(senderId))
+    const message = envelope(senderId)
+    const stored = await room.appendMessage(auth.token, senderId, message)
     expect(stored.ok).toBe(true)
+    expect(await room.setPin(auth.token, message.id, true)).toMatchObject({ ok: true })
 
     await runInDurableObject(room, (_instance, state) => {
       state.storage.sql.exec(
@@ -234,6 +343,10 @@ describe('RoomDurableObject authentication', () => {
 
     const history = await room.getMessages(auth.token, 0, 50)
     expect(history).toMatchObject({ ok: true, messages: [] })
+    expect(await room.getPin(auth.token)).toMatchObject({
+      ok: true,
+      pin: { messageId: null, version: 2 },
+    })
   })
 
   it('rate limits message floods per room device', async () => {
@@ -545,6 +658,19 @@ describe('RoomDurableObject authentication', () => {
       sequence: 1,
       duplicate: false,
     })
+    const firstPin = waitForFrame(firstSocket, 'pin')
+    const secondPin = waitForFrame(secondSocket, 'pin')
+    await room.setPin(auth.token, outbound.id, true)
+    await expect(firstPin).resolves.toMatchObject({
+      type: 'pin',
+      pin: { messageId: outbound.id, version: 1 },
+    })
+    await expect(secondPin).resolves.toMatchObject({
+      type: 'pin',
+      pin: { messageId: outbound.id, version: 1 },
+    })
+    const firstPinClear = waitForFrame(firstSocket, 'pin')
+    const secondPinClear = waitForFrame(secondSocket, 'pin')
     const firstRecall = waitForFrame(firstSocket, 'recall')
     const secondRecall = waitForFrame(secondSocket, 'recall')
     const recalled = await room.recallMessage(auth.token, firstDevice, outbound.id, recall.token)
@@ -560,6 +686,14 @@ describe('RoomDurableObject authentication', () => {
       messageId: outbound.id,
       senderId: firstDevice,
       sequence: 2,
+    })
+    await expect(firstPinClear).resolves.toMatchObject({
+      type: 'pin',
+      pin: { messageId: null, version: 2 },
+    })
+    await expect(secondPinClear).resolves.toMatchObject({
+      type: 'pin',
+      pin: { messageId: null, version: 2 },
     })
     const history = await room.getMessages(auth.token, 0, 50)
     expect(history.messages).toMatchObject([

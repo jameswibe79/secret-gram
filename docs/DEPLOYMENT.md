@@ -179,9 +179,10 @@ Use two independent browser profiles, not two tabs sharing extension or process 
 7. Upload a small PNG and verify local image preview in both browsers.
 8. Upload a small PDF and verify the browser-local PDF preview.
 9. Upload a generic file and verify its downloaded bytes or checksum locally.
-10. Reload Browser B and verify history catch-up and attachment decryption.
-11. Briefly disable networking, send/retry as appropriate, restore networking, and verify no duplicate messages.
-12. Inspect browser developer tools: no plaintext message or room code should appear in HTTP request URLs or server responses.
+10. Pin a retained message in Browser A and verify Browser B receives the pin, can replace or clear it, and restores the current pin after reload.
+11. Reload Browser B and verify history catch-up and attachment decryption.
+12. Briefly disable networking, send/retry as appropriate, restore networking, and verify no duplicate messages.
+13. Inspect browser developer tools: no plaintext message or room code should appear in HTTP request URLs or server responses.
 
 Use synthetic test content only.
 
