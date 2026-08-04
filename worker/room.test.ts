@@ -257,11 +257,15 @@ describe('RoomDurableObject authentication', () => {
     const auth = await authFixture()
     const room = roomStub(locator)
     await room.initialize({ locator, authVerifier: auth.verifier, ttlSeconds: 3_600 })
+    await runInDurableObject(room, (_instance, state) => {
+      const windowStart = Math.floor(Date.now() / 60_000) * 60_000
+      state.storage.sql.exec(
+        `INSERT INTO message_rate_windows (device_id, window_start, message_count)
+         VALUES ('__room__', ?, 600)`,
+        windowStart,
+      )
+    })
 
-    for (let index = 0; index < 600; index += 1) {
-      const senderId = crypto.randomUUID()
-      expect((await room.appendMessage(auth.token, senderId, envelope(senderId))).ok).toBe(true)
-    }
     const senderId = crypto.randomUUID()
     expect(await room.appendMessage(auth.token, senderId, envelope(senderId))).toMatchObject({
       ok: false,

@@ -1,7 +1,8 @@
 import type { MessageSenderContext } from './message-crypto'
 
 export interface ActiveRoomSession {
-  roomCode: string
+  roomId: string
+  invitationKey?: string
   locator: string
   authToken: string
   messageRoot: CryptoKey

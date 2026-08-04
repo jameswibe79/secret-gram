@@ -31,6 +31,7 @@ export function PdfPreview({ data, name, compact = false }: PdfPreviewProps) {
   const [pageNumber, setPageNumber] = useState(1)
   const [renderSize, setRenderSize] = useState({ width: 0, height: 0 })
   const [error, setError] = useState('')
+  const [retryCount, setRetryCount] = useState(0)
 
   useEffect(() => {
     const stage = stageRef.current
@@ -75,7 +76,7 @@ export function PdfPreview({ data, name, compact = false }: PdfPreviewProps) {
       renderTaskRef.current = null
       if (loadingTask !== null) void loadingTask.destroy()
     }
-  }, [data])
+  }, [data, retryCount])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -128,7 +129,20 @@ export function PdfPreview({ data, name, compact = false }: PdfPreviewProps) {
       <div ref={stageRef} className="pdf-page-stage">
         <canvas ref={canvasRef} aria-hidden="true" />
         {document === null && !error && <span className="pdf-loading">Rendering PDF…</span>}
-        {error && <span className="pdf-render-error">{error}</span>}
+        {error && (
+          <span className="pdf-render-error" role="alert">
+            {error}
+            {!compact && (
+              <button
+                type="button"
+                className="inline-button"
+                onClick={() => setRetryCount((current) => current + 1)}
+              >
+                Try again
+              </button>
+            )}
+          </span>
+        )}
       </div>
       {!compact && document !== null && document.numPages > 1 && (
         <div className="pdf-page-controls" aria-label="PDF page navigation">

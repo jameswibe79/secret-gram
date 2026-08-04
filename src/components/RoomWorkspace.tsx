@@ -5,16 +5,18 @@ import {
   useState,
   type ChangeEvent,
   type ClipboardEvent,
+  type DragEvent,
   type FormEvent,
   type KeyboardEvent,
 } from 'react'
 
 import { useRoomChannel } from '../hooks/useRoomChannel'
 import { uploadEncryptedFile } from '../lib/file-transfer'
+import { roomPath } from '../lib/room-crypto'
 import type { ActiveRoomSession } from '../lib/session'
 import { MAX_TEXT_CHARACTERS, type FileDescriptor, type PlainMessage } from '../shared/protocol'
 import { Attachment } from './Attachment'
-import { SecurityDialog } from './SecurityDialog'
+import { SecurityDialog, SecurityIcon } from './SecurityDialog'
 
 interface RoomWorkspaceProps {
   session: ActiveRoomSession
@@ -26,10 +28,21 @@ interface RoomWorkspaceProps {
 interface TransferItem {
   id: string
   name: string
+  size: number
   progress: number
   status: 'pending' | 'uploading' | 'failed'
   file?: File
+  previewUrl?: string
   error?: string
+}
+
+const LOCAL_PREVIEW_LIMIT_BYTES = 16 * 1024 * 1024
+const LOCAL_IMAGE_PREVIEW_TYPES: Record<string, true> = {
+  'image/avif': true,
+  'image/gif': true,
+  'image/jpeg': true,
+  'image/png': true,
+  'image/webp': true,
 }
 
 function statusLabel(status: ReturnType<typeof useRoomChannel>['status']): string {
@@ -50,10 +63,19 @@ function formatTime(timestamp: number): string {
   }
 }
 
-function invitationLink(roomCode: string): string {
+function formatFileSize(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`
+  if (bytes < 1_024 ** 2) return `${(bytes / 1_024).toFixed(1)} KB`
+  return `${(bytes / 1_024 ** 2).toFixed(1)} MB`
+}
+
+function invitationLink(session: ActiveRoomSession): string {
   const url = new URL(window.location.href)
+  url.pathname = roomPath(session.roomId)
   url.search = ''
-  url.hash = new URLSearchParams({ room: roomCode }).toString()
+  url.hash = session.invitationKey === undefined
+    ? ''
+    : new URLSearchParams({ key: session.invitationKey }).toString()
   return url.toString()
 }
 
@@ -86,12 +108,13 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
   const [senderName, setSenderName] = useState(`Guest ${session.deviceId.slice(0, 4).toUpperCase()}`)
   const [composerError, setComposerError] = useState('')
   const [showInvite, setShowInvite] = useState(false)
-  const [showCode, setShowCode] = useState(false)
   const [showSecurity, setShowSecurity] = useState(false)
   const [recallCandidateId, setRecallCandidateId] = useState<string | null>(null)
   const [copied, setCopied] = useState('')
   const [transfers, setTransfers] = useState<TransferItem[]>([])
+  const [isDraggingFiles, setIsDraggingFiles] = useState(false)
   const controllersRef = useRef(new Map<string, AbortController>())
+  const transfersRef = useRef<TransferItem[]>([])
   const activeRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const timelineEndRef = useRef<HTMLDivElement>(null)
@@ -108,7 +131,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
 
   useEffect(() => {
     timelineEndRef.current?.scrollIntoView?.({ block: 'end' })
-  }, [messages.length, transfers.length])
+  }, [messages.length])
+
+  useEffect(() => {
+    transfersRef.current = transfers
+  }, [transfers])
 
   useEffect(() => {
     activeRef.current = true
@@ -116,6 +143,10 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     return () => {
       activeRef.current = false
       for (const controller of controllers.values()) controller.abort()
+      for (const transfer of transfersRef.current) {
+        if (transfer.previewUrl) URL.revokeObjectURL(transfer.previewUrl)
+      }
+      transfersRef.current = []
     }
   }, [])
 
@@ -176,7 +207,6 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
           transferId: id,
           controller: new AbortController(),
         })),
-        false,
       )
     }
   }
@@ -203,28 +233,14 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
 
   async function uploadFiles(
     batch: Array<{ file: File; transferId: string; controller: AbortController }>,
-    addTransfers: boolean,
   ) {
     for (const transfer of batch) {
       controllersRef.current.set(transfer.transferId, transfer.controller)
     }
-    setTransfers((current) => {
-      if (addTransfers) {
-        return [
-          ...current,
-          ...batch.map(({ file, transferId }) => ({
-            id: transferId,
-            name: file.name || 'Pasted file',
-            progress: 0,
-            status: 'uploading' as const,
-          })),
-        ]
-      }
-      const ids = new Set(batch.map(({ transferId }) => transferId))
-      return current.map((item) => ids.has(item.id)
-        ? { ...item, progress: 0, status: 'uploading' as const, file: undefined }
-        : item)
-    })
+    const ids = new Set(batch.map(({ transferId }) => transferId))
+    setTransfers((current) => current.map((item) => ids.has(item.id)
+      ? { ...item, progress: 0, status: 'uploading' as const, error: undefined }
+      : item))
 
     for (const { file, transferId, controller } of batch) {
       if (controller.signal.aborted || !activeRef.current) {
@@ -246,7 +262,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
         if (controller.signal.aborted || !activeRef.current) continue
         await sendFileMessage(descriptor)
         if (activeRef.current) {
-          setTransfers((current) => current.filter((item) => item.id !== transferId))
+          setTransfers((current) => {
+            const completed = current.find((item) => item.id === transferId)
+            if (completed?.previewUrl) URL.revokeObjectURL(completed.previewUrl)
+            return current.filter((item) => item.id !== transferId)
+          })
         }
       } catch (error) {
         const aborted = controller.signal.aborted
@@ -267,20 +287,30 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     }
   }
 
-  async function uploadSelectedFiles(event: ChangeEvent<HTMLInputElement>) {
-    const files = [...(event.target.files ?? [])]
-    event.target.value = ''
-    await uploadFiles(
-      files.map((file) => ({
-        file,
-        transferId: crypto.randomUUID(),
-        controller: new AbortController(),
-      })),
-      true,
-    )
+  function queueFiles(files: File[]): Array<TransferItem & { file: File }> {
+    const nextTransfers = files.map((file) => ({
+      id: crypto.randomUUID(),
+      name: file.name || 'Pasted file',
+      size: file.size,
+      progress: 0,
+      status: 'pending' as const,
+      file,
+      ...(LOCAL_IMAGE_PREVIEW_TYPES[file.type] === true && file.size <= LOCAL_PREVIEW_LIMIT_BYTES
+        ? { previewUrl: URL.createObjectURL(file) }
+        : {}),
+    }))
+    if (nextTransfers.length > 0) {
+      setTransfers((current) => [...current, ...nextTransfers])
+    }
+    return nextTransfers
   }
 
-  function queuePastedFiles(event: ClipboardEvent<HTMLTextAreaElement>) {
+  function uploadSelectedFiles(event: ChangeEvent<HTMLInputElement>) {
+    queueFiles([...(event.target.files ?? [])])
+    event.target.value = ''
+  }
+
+  function sendPastedFiles(event: ClipboardEvent<HTMLTextAreaElement>) {
     const itemFiles = [...event.clipboardData.items]
       .filter((item) => item.kind === 'file')
       .map((item) => item.getAsFile())
@@ -288,20 +318,40 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     const files = itemFiles.length > 0 ? itemFiles : [...event.clipboardData.files]
     if (files.length === 0) return
     event.preventDefault()
-    setTransfers((current) => [
-      ...current,
-      ...files.map((file) => ({
-        id: crypto.randomUUID(),
-        name: file.name || 'Pasted file',
-        progress: 0,
-        status: 'pending' as const,
-        file,
-      })),
-    ])
+    const pastedTransfers = queueFiles(files)
+    void uploadFiles(pastedTransfers.map((transfer) => ({
+      file: transfer.file,
+      transferId: transfer.id,
+      controller: new AbortController(),
+    })))
+  }
+
+  function queueDroppedFiles(event: DragEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setIsDraggingFiles(false)
+    queueFiles([...event.dataTransfer.files])
   }
 
   function cancelTransfer(id: string) {
     controllersRef.current.get(id)?.abort()
+  }
+
+  function removeTransfer(id: string) {
+    setTransfers((current) => {
+      const removed = current.find((item) => item.id === id)
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+      return current.filter((item) => item.id !== id)
+    })
+  }
+
+  function retryTransfer(id: string) {
+    const transfer = transfers.find((item) => item.id === id)
+    if (transfer?.file === undefined) return
+    void uploadFiles([{
+      file: transfer.file,
+      transferId: transfer.id,
+      controller: new AbortController(),
+    }])
   }
 
   function leaveRoom() {
@@ -312,8 +362,15 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
       return
     }
     for (const controller of controllersRef.current.values()) controller.abort()
+    for (const transfer of transfersRef.current) {
+      if (transfer.previewUrl) URL.revokeObjectURL(transfer.previewUrl)
+    }
+    transfersRef.current = []
     onLeave()
   }
+
+  const activeUploadCount = transfers.filter((transfer) => transfer.status === 'uploading').length
+  const hasActiveUploads = activeUploadCount > 0
 
   const hasPendingFiles = transfers.some((transfer) => transfer.status === 'pending')
 
@@ -321,9 +378,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     <main className="room-shell">
       <header className="room-bar">
         <div className="room-identity">
-          <div className="brand-mark compact" aria-hidden="true">SG</div>
+          <div className="brand-mark compact" aria-hidden="true"><span>S</span></div>
           <div>
-            <h1>Secure room</h1>
+            <div className="room-title-line">
+              <h1>Secure room</h1>
+            </div>
             <div className="room-status" aria-live="polite">
               <span className={`status-dot ${status}`} aria-hidden="true" />
               <span>{statusLabel(status)}</span>
@@ -334,19 +393,25 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
           </div>
         </div>
         <div className="room-actions">
-          <button className="small-button" type="button" onClick={() => setShowInvite((value) => !value)}>
+          <button className="small-button primary-soft" type="button" onClick={() => setShowInvite((value) => !value)}>
+            <span aria-hidden="true">＋</span>
             Invite
           </button>
           <button
-            className="small-button"
+            className="small-button icon-button"
             type="button"
             aria-label={`Switch to ${theme === 'night' ? 'day' : 'night'} theme`}
             onClick={onToggleTheme}
           >
-            {theme === 'night' ? 'Day' : 'Night'}
+            <span aria-hidden="true">{theme === 'night' ? '☀' : '☾'}</span>
           </button>
-          <button className="small-button" type="button" onClick={() => setShowSecurity(true)}>
-            Security
+          <button
+            className="small-button icon-button"
+            type="button"
+            aria-label="Security"
+            onClick={() => setShowSecurity(true)}
+          >
+            <SecurityIcon />
           </button>
           <button
             className="small-button danger"
@@ -363,29 +428,28 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
         <section className="invite-banner" aria-labelledby="invite-title">
           <div className="invite-copy">
             <div>
-              <p className="eyebrow" id="invite-title">Invitation credential</p>
-              <code className={showCode ? 'room-code' : 'room-code masked'}>
-                {showCode ? session.roomCode : '••••-••••-••••-••••-••••-••••-••'}
-              </code>
+              <p className="eyebrow" id="invite-title">Room invitation</p>
+              <code className="room-id">{roomPath(session.roomId)}</code>
             </div>
-            <p>Anyone with this credential can join and decrypt. Share it through a trusted channel.</p>
+            <p>
+              {session.invitationKey === undefined
+                ? 'Share this room ID and send the password separately.'
+                : 'The full invitation link carries the encryption key in its URL fragment.'}
+            </p>
           </div>
           <div className="invite-actions">
-            <button className="small-button" type="button" onClick={() => setShowCode((value) => !value)}>
-              {showCode ? 'Hide' : 'Show'}
-            </button>
             <button
               className="small-button"
               type="button"
-              aria-label="Copy room code"
-              onClick={() => copy(session.roomCode, 'Room code copied')}
+              aria-label="Copy room ID"
+              onClick={() => copy(roomPath(session.roomId), 'Room ID copied')}
             >
-              Copy room code
+              Copy room ID
             </button>
             <button
               className="small-button"
               type="button"
-              onClick={() => copy(invitationLink(session.roomCode), 'Invitation link copied')}
+              onClick={() => copy(invitationLink(session), 'Invitation link copied')}
             >
               Copy invitation link
             </button>
@@ -412,11 +476,12 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
         </div>
       )}
 
-      <section className="workspace">
+      <section className={isDraggingFiles ? 'workspace is-dragging' : 'workspace'}>
         <div className="timeline" aria-label="Encrypted messages">
-          {messages.length === 0 && transfers.length === 0 && (
+          {messages.length === 0 && (
             <div className="empty-state">
-              <span className="empty-mark" aria-hidden="true">E2EE</span>
+              <span className="empty-illustration" aria-hidden="true"><i /></span>
+              <span className="empty-mark">End-to-end encrypted</span>
               <h2>Your room is ready</h2>
               <p>Share the invitation link, then send the first encrypted message or attachment.</p>
               {!showInvite && (
@@ -489,46 +554,114 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
             )
           })}
 
-          {transfers.map((transfer) => (
-            <article className={`transfer-card ${transfer.status}`} key={transfer.id}>
-              <div>
-                <strong>{transfer.name}</strong>
-                <span>
-                  {transfer.status === 'pending'
-                    ? 'Pending to send'
-                    : transfer.status === 'uploading' ? 'Encrypting locally and uploading' : transfer.error}
-                </span>
-              </div>
-              {transfer.status === 'uploading' ? (
-                <>
-                  <progress max={1} value={transfer.progress} aria-label={`${transfer.name} upload progress`} />
-                  <button className="inline-button" type="button" onClick={() => cancelTransfer(transfer.id)}>Cancel</button>
-                </>
-              ) : (
-                <button
-                  className="inline-button"
-                  type="button"
-                  onClick={() => setTransfers((current) => current.filter((item) => item.id !== transfer.id))}
-                >
-                  Remove
-                </button>
-              )}
-            </article>
-          ))}
           <div ref={timelineEndRef} />
         </div>
 
-        <form className="composer" onSubmit={submitText}>
+        <form
+          className="composer"
+          onSubmit={submitText}
+          onDragEnter={(event) => {
+            if (event.dataTransfer.types.includes('Files')) setIsDraggingFiles(true)
+          }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes('Files')) return
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'copy'
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFiles(false)
+          }}
+          onDrop={queueDroppedFiles}
+        >
+          <div className="drop-hint" aria-hidden={!isDraggingFiles}>
+            <span>Drop files here to add them</span>
+          </div>
           <div className="composer-context">
-            <label htmlFor="sender-name">Room display name</label>
+            <label htmlFor="sender-name">Writing as</label>
             <input
               id="sender-name"
               value={senderName}
               maxLength={40}
               onChange={(event) => setSenderName(event.target.value)}
             />
-            <span>Sent only inside encrypted messages; this is not a verified identity</span>
+            <span>Display names are encrypted, but not identity-verified</span>
           </div>
+          {transfers.length > 0 && (
+            <section className="attachment-tray" aria-label="Attachment activity" aria-live="polite">
+              <div className="attachment-tray-heading">
+                <strong>
+                  {hasActiveUploads
+                    ? `Sending ${activeUploadCount} attachment${activeUploadCount === 1 ? '' : 's'}`
+                    : hasPendingFiles
+                      ? `${transfers.length} attachment${transfers.length === 1 ? '' : 's'} ready`
+                      : `${transfers.length} attachment${transfers.length === 1 ? '' : 's'} need attention`}
+                </strong>
+                <span>
+                  {hasActiveUploads
+                    ? 'Encrypting and uploading'
+                    : hasPendingFiles
+                      ? 'Review, then send'
+                      : 'Retry or remove failed uploads'}
+                </span>
+              </div>
+              <div className="attachment-tray-items">
+                {transfers.map((transfer) => (
+                  <article className={`transfer-card ${transfer.status}`} key={transfer.id}>
+                    {transfer.previewUrl ? (
+                      <img className="transfer-thumbnail" src={transfer.previewUrl} alt="" />
+                    ) : (
+                      <span className="transfer-glyph" aria-hidden="true">FILE</span>
+                    )}
+                    <div className="transfer-copy">
+                      <strong title={transfer.name}>{transfer.name}</strong>
+                      <span>
+                        {formatFileSize(transfer.size)} · {transfer.status === 'pending'
+                          ? 'Ready to send with your message'
+                          : transfer.status === 'uploading'
+                            ? `Encrypting and uploading · ${Math.round(transfer.progress * 100)}%`
+                            : transfer.error}
+                      </span>
+                      {transfer.status === 'uploading' && (
+                        <progress max={1} value={transfer.progress} aria-label={`${transfer.name} upload progress`} />
+                      )}
+                    </div>
+                    <div className="transfer-actions">
+                      {transfer.status === 'uploading' && (
+                        <button
+                          className="tray-action"
+                          type="button"
+                          aria-label={`Cancel ${transfer.name} upload`}
+                          onClick={() => cancelTransfer(transfer.id)}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                      {transfer.status === 'failed' && transfer.file !== undefined && (
+                        <button
+                          className="tray-action retry"
+                          type="button"
+                          aria-label={`Retry ${transfer.name} upload`}
+                          onClick={() => retryTransfer(transfer.id)}
+                        >
+                          Retry
+                        </button>
+                      )}
+                      {transfer.status !== 'uploading' && (
+                        <button
+                          className="tray-remove"
+                          type="button"
+                          aria-label={`Remove ${transfer.name}`}
+                          onClick={() => removeTransfer(transfer.id)}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
           <div className="composer-row">
             <input
               ref={fileInputRef}
@@ -544,26 +677,27 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
               aria-label="Add attachment"
               onClick={() => fileInputRef.current?.click()}
             >
-              +
+              <span aria-hidden="true">＋</span>
             </button>
             <textarea
               ref={composerTextareaRef}
               value={draft}
               maxLength={MAX_TEXT_CHARACTERS}
               rows={1}
-              placeholder="Type an encrypted message…"
+              placeholder={hasPendingFiles ? 'Add a note, or send the files as they are…' : 'Write a quiet, encrypted message…'}
               aria-label="Message"
               aria-describedby="composer-help composer-count"
               onChange={(event) => setDraft(event.target.value)}
-              onPaste={queuePastedFiles}
+              onPaste={sendPastedFiles}
               onKeyDown={handleComposerKey}
             />
             <button className="send-button" type="submit" disabled={!draft.trim() && !hasPendingFiles}>
-              Send
+              <span>{hasPendingFiles && !draft.trim() ? 'Send files' : 'Send'}</span>
+              <span aria-hidden="true">↑</span>
             </button>
           </div>
           <div className="composer-footer" id="composer-help">
-            <span>Enter to send · Shift+Enter for a new line · Paste files to queue</span>
+            <span>Enter to send · Shift+Enter for a new line · Paste files to send instantly</span>
             <span id="composer-count">{draft.length}/{MAX_TEXT_CHARACTERS}</span>
           </div>
           {composerError && <p className="inline-error" role="alert">{composerError}</p>}
@@ -610,7 +744,7 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
             <div><dt>Attachment encryption</dt><dd>Chunked AES-256-GCM; previews are generated only after local decryption</dd></div>
             <div><dt>Message retention</dt><dd>Encrypted messages are retained for up to seven days, or until the room expires if sooner</dd></div>
             <div><dt>Room expires</dt><dd>{new Date(session.expiresAt).toLocaleString('en-US')}</dd></div>
-            <div><dt>Identity model</dt><dd>Shared room code, no accounts; display names and device labels are not authenticated identities</dd></div>
+            <div><dt>Identity model</dt><dd>Public room ID plus a secure link or password; display names and device labels are not authenticated identities</dd></div>
             <div><dt>Visible metadata</dt><dd>The server can observe IP addresses, connection times, traffic sizes, and online session counts</dd></div>
           </dl>
           <p className="security-warning">This version does not provide forward secrecy, individual member revocation, or enterprise SSO.</p>

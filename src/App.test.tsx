@@ -12,7 +12,7 @@ import {
   recallRoomMessage,
 } from './lib/api'
 import { uploadEncryptedFile } from './lib/file-transfer'
-import { generateRoomCode } from './lib/room-crypto'
+import { generateRoomKey } from './lib/room-crypto'
 
 vi.mock('./lib/api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./lib/api')>()
@@ -82,20 +82,23 @@ describe('SecretGram application', () => {
     expect(screen.getByRole('button', { name: 'Switch to night theme' })).toBeInTheDocument()
   })
 
-  it('removes an invitation fragment immediately while keeping its code in memory', () => {
-    window.history.replaceState(null, '', '/#room=TEST-ROOM-CODE')
+  it('removes a secure invitation key from the URL while keeping it in memory', () => {
+    const roomKey = generateRoomKey()
+    window.history.replaceState(null, '', `/r/ABC123#${new URLSearchParams({ key: roomKey })}`)
 
     render(<App />)
 
+    expect(window.location.pathname).toBe('/r/ABC123')
     expect(window.location.hash).toBe('')
-    expect(screen.getByLabelText('Room code or invitation link')).toHaveValue('TEST-ROOM-CODE')
+    expect(screen.getByLabelText('Room ID or invitation link')).toHaveValue('ABC123')
+    expect(screen.getByLabelText('Room password')).toBeDisabled()
   })
 
   it('opens on the focused join workflow with an honest encryption notice', () => {
     render(<App />)
 
     expect(screen.getByRole('heading', { name: 'Join an encrypted room' })).toBeInTheDocument()
-    expect(screen.getByLabelText('Room code or invitation link')).toBeInTheDocument()
+    expect(screen.getByLabelText('Room ID or invitation link')).toBeInTheDocument()
     expect(screen.getByText(/Content encrypted on this device/)).toBeInTheDocument()
   })
 
@@ -115,14 +118,14 @@ describe('SecretGram application', () => {
     expect(screen.getByText(/This room expires after 30 days/)).toBeInTheDocument()
   })
 
-  it('rejects an invalid room code before contacting the API', async () => {
+  it('rejects an invalid room ID before contacting the API', async () => {
     const user = userEvent.setup()
     render(<App />)
 
-    await user.type(screen.getByLabelText('Room code or invitation link'), '1234')
+    await user.type(screen.getByLabelText('Room ID or invitation link'), '1234')
     await user.click(screen.getByRole('button', { name: 'Join room' }))
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Invalid room code')
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid room ID')
     expect(getRoomInfo).not.toHaveBeenCalled()
   })
 
@@ -140,7 +143,7 @@ describe('SecretGram application', () => {
     expect(trigger).toHaveFocus()
   })
 
-  it('keeps invitation controls collapsed until the user opens them', async () => {
+  it('creates a short room URL and keeps invitation controls collapsed', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -148,16 +151,42 @@ describe('SecretGram application', () => {
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
 
     expect(await screen.findByRole('heading', { name: 'Secure room' })).toBeInTheDocument()
-    expect(screen.queryByText('••••-••••-••••-••••-••••-••••-••')).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Copy room code' })).not.toBeInTheDocument()
+    expect(window.location.pathname).toMatch(/^\/r\/[0-9A-HJKMNP-TV-Z]{6}$/)
+    expect(window.location.hash).toBe('')
+    expect(screen.queryByRole('button', { name: 'Copy room ID' })).not.toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus())
 
     await user.click(screen.getByRole('button', { name: 'Invite' }))
-    expect(screen.getByText('••••-••••-••••-••••-••••-••••-••')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Copy room code' })).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Show' }))
-    expect(screen.getByRole('button', { name: 'Hide' })).toBeInTheDocument()
+    expect(screen.getByText(window.location.pathname)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy room ID' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Copy invitation link' })).toBeInTheDocument()
     expect(createRoom).toHaveBeenCalledTimes(1)
+  })
+
+  it('creates and rejoins a password-protected short room', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.click(screen.getByRole('tab', { name: 'Create room' }))
+    await user.type(screen.getByLabelText('Optional room password'), 'correct horse')
+    await user.type(screen.getByLabelText('Confirm password'), 'correct horse')
+    await user.click(screen.getByRole('button', { name: 'Create secure room' }))
+    await screen.findByRole('heading', { name: 'Secure room' })
+    const roomId = window.location.pathname.slice('/r/'.length)
+    const createdLocator = vi.mocked(createRoom).mock.calls[0]?.[0]
+
+    await user.click(screen.getByRole('button', { name: 'Invite' }))
+    expect(screen.getByText('Share this room ID and send the password separately.')).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Leave room' }))
+
+    await user.type(screen.getByLabelText('Room ID or invitation link'), roomId)
+    await user.type(screen.getByLabelText('Room password'), 'correct horse')
+    await user.click(screen.getByRole('button', { name: 'Join room' }))
+    expect(await screen.findByRole('heading', { name: 'Secure room' })).toBeInTheDocument()
+    expect(getRoomInfo).toHaveBeenCalledWith(
+      createdLocator,
+      expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
+    )
   })
 
   it('recalls a sent message through an in-app confirmation dialog', async () => {
@@ -187,25 +216,27 @@ describe('SecretGram application', () => {
     expect(screen.getByText('Recalled for everyone')).toBeInTheDocument()
   })
 
-  it('clears an invitation secret from the URL and join form after leaving', async () => {
+  it('joins from a secure short link and clears the path after leaving', async () => {
     const user = userEvent.setup()
-    const roomCode = await generateRoomCode()
-    window.location.hash = `room=${encodeURIComponent(roomCode)}`
+    const roomKey = generateRoomKey()
+    window.history.replaceState(null, '', `/r/ABC123#${new URLSearchParams({ key: roomKey })}`)
     render(<App />)
 
-    expect(screen.getByLabelText('Room code or invitation link')).toHaveValue(roomCode)
+    expect(screen.getByLabelText('Room ID or invitation link')).toHaveValue('ABC123')
     await user.click(screen.getByRole('button', { name: 'Join room' }))
     expect(await screen.findByRole('heading', { name: 'Secure room' })).toBeInTheDocument()
+    expect(window.location.pathname).toBe('/r/ABC123')
     expect(window.location.hash).toBe('')
 
     await user.click(screen.getByRole('button', { name: 'Leave room' }))
-    expect(screen.getByLabelText('Room code or invitation link')).toHaveValue('')
+    expect(window.location.pathname).toBe('/')
+    expect(screen.getByLabelText('Room ID or invitation link')).toHaveValue('')
   })
 
-  it('queues pasted files until the user sends them', async () => {
-    const user = userEvent.setup()
+  it('encrypts and sends pasted files immediately', async () => {
     vi.mocked(uploadEncryptedFile).mockRejectedValue(new Error('Upload stopped for test'))
     render(<App />)
+    const user = userEvent.setup()
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
     await screen.findByRole('heading', { name: 'Secure room' })
@@ -218,28 +249,30 @@ describe('SecretGram application', () => {
       },
     })
 
-    expect(await screen.findByText('Pending to send')).toBeInTheDocument()
-    expect(screen.getByText('pasted.txt')).toBeInTheDocument()
-    expect(uploadEncryptedFile).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeEnabled()
-
-    await user.click(screen.getByRole('button', { name: 'Send' }))
     await waitFor(() => expect(uploadEncryptedFile).toHaveBeenCalledTimes(1))
-    expect(await screen.findByText('Upload stopped for test')).toBeInTheDocument()
+    expect(screen.getByText('pasted.txt')).toBeInTheDocument()
+    expect(await screen.findByText(/Upload stopped for test/u)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Retry pasted.txt upload' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
   it('does not start later queued uploads after leaving the room', async () => {
     const user = userEvent.setup()
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    vi.mocked(uploadEncryptedFile).mockImplementation((_file, _credentials, options) =>
-      new Promise((_resolve, reject) => {
-        options?.signal?.addEventListener(
-          'abort',
-          () => reject(new DOMException('Operation canceled', 'AbortError')),
-          { once: true },
-        )
-      }),
-    )
+    vi.mocked(uploadEncryptedFile).mockImplementation((_file, _credentials, options) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          options?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('Operation canceled', 'AbortError')),
+            { once: true },
+          )
+        },
+      })
+      return new Response(stream).blob().then(() => {
+        throw new Error('Unexpected upload stream completion')
+      })
+    })
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
@@ -249,6 +282,8 @@ describe('SecretGram application', () => {
       new File(['one'], 'one.txt', { type: 'text/plain' }),
       new File(['two'], 'two.txt', { type: 'text/plain' }),
     ])
+    expect(uploadEncryptedFile).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Send files' }))
     await waitFor(() => expect(uploadEncryptedFile).toHaveBeenCalledTimes(1))
     await user.click(screen.getByRole('button', { name: 'Leave room' }))
     await Promise.resolve()

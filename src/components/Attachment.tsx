@@ -14,13 +14,21 @@ interface AttachmentProps {
 }
 
 const PREVIEW_LIMIT_BYTES = 64 * 1024 * 1024
-const SAFE_IMAGE_TYPES = new Set([
-  'image/avif',
-  'image/gif',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-])
+const TEXT_PREVIEW_LIMIT_BYTES = 1 * 1024 * 1024
+const AUTO_PREVIEW_LIMIT_BYTES = 8 * 1024 * 1024
+const AUTO_TEXT_PREVIEW_LIMIT_BYTES = 256 * 1024
+const INLINE_TEXT_CHARACTERS = 4_000
+const SAFE_IMAGE_TYPES: Record<string, true> = {
+  'image/avif': true,
+  'image/gif': true,
+  'image/jpeg': true,
+  'image/png': true,
+  'image/webp': true,
+}
+
+function isPlainTextType(mimeType: string): boolean {
+  return mimeType.toLowerCase().startsWith('text/')
+}
 
 function fileSize(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`
@@ -42,21 +50,33 @@ function safeDownloadName(name: string): string {
 export function Attachment({ descriptor, credentials }: AttachmentProps) {
   const [objectUrl, setObjectUrl] = useState('')
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null)
+  const [previewText, setPreviewText] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [progress, setProgress] = useState(0)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [error, setError] = useState('')
+  const [autoPreviewRequested, setAutoPreviewRequested] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const blobPromiseRef = useRef<Promise<Blob> | null>(null)
   const previewBlobRef = useRef<Blob | null>(null)
+  const previewTextRef = useRef<string | null>(null)
   const objectUrlRef = useRef('')
+  const attachmentRef = useRef<HTMLElement | null>(null)
   const mountedRef = useRef(true)
   const previewType = useMemo(() => {
+    if (isPlainTextType(descriptor.mimeType)) {
+      return descriptor.size <= TEXT_PREVIEW_LIMIT_BYTES ? 'text' : 'none'
+    }
     if (descriptor.size > PREVIEW_LIMIT_BYTES) return 'none'
-    if (SAFE_IMAGE_TYPES.has(descriptor.mimeType)) return 'image'
+    if (SAFE_IMAGE_TYPES[descriptor.mimeType] === true) return 'image'
     if (descriptor.mimeType === 'application/pdf') return 'pdf'
     return 'none'
   }, [descriptor.mimeType, descriptor.size])
+  const autoPreviewLimit = previewType === 'text'
+    ? AUTO_TEXT_PREVIEW_LIMIT_BYTES
+    : AUTO_PREVIEW_LIMIT_BYTES
+  const autoPreviewEnabled = previewType !== 'none' && descriptor.size <= autoPreviewLimit
+  const previewGlyph = previewType === 'image' ? 'IMG' : previewType === 'pdf' ? 'PDF' : 'TXT'
 
   useEffect(() => {
     mountedRef.current = true
@@ -66,6 +86,7 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
       objectUrlRef.current = ''
       previewBlobRef.current = null
+      previewTextRef.current = null
     }
   }, [])
 
@@ -132,51 +153,130 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
   }
 
   const ensurePreviewUrl = useCallback(async (): Promise<string> => {
-    if (objectUrlRef.current && previewBlobRef.current) return objectUrlRef.current
+    if (
+      objectUrlRef.current &&
+      previewBlobRef.current &&
+      (previewType !== 'text' || previewTextRef.current !== null)
+    ) {
+      return objectUrlRef.current
+    }
     const blob = previewBlobRef.current ?? await getBlob()
     if (!mountedRef.current) throw new DOMException('Operation canceled', 'AbortError')
     previewBlobRef.current = blob
     setPreviewBlob(blob)
+    if (previewType === 'text' && previewTextRef.current === null) {
+      const text = await blob.text()
+      if (!mountedRef.current) throw new DOMException('Operation canceled', 'AbortError')
+      previewTextRef.current = text
+      setPreviewText(text)
+    }
     if (objectUrlRef.current) return objectUrlRef.current
     const nextUrl = URL.createObjectURL(blob)
     objectUrlRef.current = nextUrl
     setObjectUrl(nextUrl)
     return nextUrl
-  }, [getBlob])
-
-  async function openPreview() {
-    try {
-      await ensurePreviewUrl()
-      if (mountedRef.current) setPreviewOpen(true)
-    } catch {
-      // The inline error gives the user the recovery state.
-    }
-  }
+  }, [getBlob, previewType])
 
   useEffect(() => {
-    if (previewType === 'none') return
+    if (!autoPreviewEnabled) return
+    const attachment = attachmentRef.current
+    if (attachment === null || typeof IntersectionObserver === 'undefined') {
+      setAutoPreviewRequested(true)
+      return
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return
+      setAutoPreviewRequested(true)
+      observer.disconnect()
+    }, { rootMargin: '160px' })
+    observer.observe(attachment)
+    return () => observer.disconnect()
+  }, [autoPreviewEnabled])
+
+  useEffect(() => {
+    if (!autoPreviewEnabled || !autoPreviewRequested) return
     let stopped = false
     void ensurePreviewUrl().catch(() => {
       if (stopped || !mountedRef.current) return
       void ensurePreviewUrl().catch(() => {
-        // The inline error gives the user the recovery state.
+        // The inline preview keeps a clickable recovery state.
       })
     })
     return () => {
       stopped = true
     }
-  }, [ensurePreviewUrl, previewType])
+  }, [autoPreviewEnabled, autoPreviewRequested, ensurePreviewUrl])
+
+  async function openPreview() {
+    setPreviewOpen(true)
+    try {
+      await ensurePreviewUrl()
+    } catch {
+      // The open preview keeps a clear retry state visible.
+    }
+  }
+
+  function cancelLoad() {
+    abortRef.current?.abort()
+    if (mountedRef.current) {
+      setError('Preview canceled. You can try again when you are ready.')
+    }
+  }
+
+  function closePreview() {
+    abortRef.current?.abort()
+    setPreviewOpen(false)
+  }
 
   return (
-    <section className="attachment" aria-label={`Attachment: ${descriptor.name}`}>
+    <section ref={attachmentRef} className="attachment" aria-label={`Attachment: ${descriptor.name}`}>
       <div className={previewType === 'none' ? 'attachment-card' : 'attachment-card has-preview'}>
+        {previewType !== 'none' && (
+          <div className="attachment-preview">
+            <button
+              type="button"
+              className="preview-thumb"
+              disabled={loading}
+              aria-label={`Open ${descriptor.name} preview`}
+              onClick={openPreview}
+            >
+              {previewType === 'image' && objectUrl ? (
+                <img src={objectUrl} alt="" />
+              ) : previewType === 'pdf' && previewBlob && !previewOpen ? (
+                <PdfPreview data={previewBlob} name={descriptor.name} compact />
+              ) : previewType === 'text' && previewText !== null ? (
+                <span className="text-preview-snippet" dir="auto">
+                  {previewText === '' ? 'Empty text file' : previewText.slice(0, INLINE_TEXT_CHARACTERS)}
+                </span>
+              ) : loading ? (
+                <span className="preview-placeholder is-loading">
+                  <span className="preview-glyph" aria-hidden="true">{previewGlyph}</span>
+                  <strong>Preparing preview</strong>
+                  <span className="inline-preview-progress">
+                    <progress max={1} value={progress} aria-label={`${descriptor.name} inline preview progress`} />
+                    <small>{Math.round(progress * 100)}%</small>
+                  </span>
+                </span>
+              ) : (
+                <span className="preview-placeholder">
+                  <span className="preview-glyph" aria-hidden="true">{previewGlyph}</span>
+                  <strong>{error ? 'Try preview again' : 'Open preview'}</strong>
+                  <small>{autoPreviewEnabled ? 'Preview unavailable' : 'Loads when requested'}</small>
+                </span>
+              )}
+              {objectUrl && <span className="preview-overlay">Open preview</span>}
+            </button>
+            <span className="preview-privacy">Browser-only preview</span>
+          </div>
+        )}
+
         <div className="attachment-details">
           <div className="attachment-summary">
             <span className="file-glyph" aria-hidden="true">
-              {previewType === 'image' ? 'IMG' : previewType === 'pdf' ? 'PDF' : 'FILE'}
+              {previewGlyph}
             </span>
             <div className="attachment-name">
-              <strong>{descriptor.name}</strong>
+              <strong title={descriptor.name}>{descriptor.name}</strong>
               <span>{fileSize(descriptor.size)} · encrypted attachment</span>
             </div>
           </div>
@@ -186,59 +286,90 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
             </button>
           </div>
         </div>
-        {previewType !== 'none' && (
-          <button
-            type="button"
-            className="preview-thumb"
-            disabled={loading}
-            aria-label={`Open ${descriptor.name} preview`}
-            onClick={openPreview}
-          >
-            {previewType === 'image' && objectUrl ? (
-              <img src={objectUrl} alt="" />
-            ) : previewType === 'pdf' && previewBlob ? (
-              <PdfPreview data={previewBlob} name={descriptor.name} compact />
-            ) : (
-              <span>{previewType === 'image' ? 'IMG' : 'PDF'}</span>
-            )}
-          </button>
-        )}
       </div>
 
-      {loading && (
+      {loading && !previewOpen && previewType === 'none' && (
         <div className="transfer-progress" aria-live="polite">
           <progress max={1} value={progress} aria-label={`${descriptor.name} download progress`} />
           <span>Downloading and decrypting… {Math.round(progress * 100)}%</span>
+          <button className="inline-button" type="button" onClick={cancelLoad}>Cancel</button>
         </div>
       )}
-      {error && <p className="inline-error" role="alert">{error}</p>}
+      {error && !previewOpen && <p className="inline-error" role="alert">{error}</p>}
 
-      {previewOpen && objectUrl && previewBlob && (
+      {previewOpen && (
         <SecurityDialog
           title={descriptor.name}
           backdropClassName="preview-backdrop"
           className="preview-modal"
-          onClose={() => setPreviewOpen(false)}
+          onClose={closePreview}
         >
           <div className="preview-toolbar">
-            <span>{previewType === 'image' ? 'Image preview' : 'PDF preview'}</span>
-            <a href={objectUrl} target="_blank" rel="noopener noreferrer">
-              {previewType === 'image' ? 'Open full size' : 'Open in new tab'}
-            </a>
+            <div>
+              <strong>
+                {previewType === 'image'
+                  ? 'Image preview'
+                  : previewType === 'pdf'
+                    ? 'PDF preview'
+                    : 'Plain-text preview'}
+              </strong>
+              <span>{fileSize(descriptor.size)} · decrypted only in this browser</span>
+            </div>
+            {objectUrl && previewBlob && (
+              <div className="preview-toolbar-actions">
+                <button type="button" className="small-button" onClick={download}>Download</button>
+                <a className="small-button primary-soft" href={objectUrl} target="_blank" rel="noopener noreferrer">
+                  {previewType === 'image' ? 'Open full size' : 'Open in new tab'}
+                </a>
+              </div>
+            )}
           </div>
-          {previewType === 'image' && (
+          {loading && (
+            <div className="preview-loading-state" aria-live="polite">
+              <span className="preview-loading-art" aria-hidden="true"><i /></span>
+              <h3>Preparing your preview</h3>
+              <p>Downloading encrypted pieces, checking integrity, then decrypting them here.</p>
+              <div className="preview-loading-progress">
+                <progress max={1} value={progress} aria-label={`${descriptor.name} preview progress`} />
+                <span>{Math.round(progress * 100)}%</span>
+              </div>
+              <button type="button" className="small-button" onClick={cancelLoad}>Cancel preview</button>
+            </div>
+          )}
+          {!loading && error && (!objectUrl || !previewBlob) && (
+            <div className="preview-error-state" role="alert">
+              <span aria-hidden="true">!</span>
+              <h3>Preview could not be prepared</h3>
+              <p>{error}</p>
+              <button type="button" className="small-button primary-soft" onClick={openPreview}>Try again</button>
+            </div>
+          )}
+          {!loading && previewType === 'image' && objectUrl && previewBlob && (
             <div className="modal-image-preview">
               <img src={objectUrl} alt={descriptor.name} />
             </div>
           )}
-          {previewType === 'pdf' && (
+          {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
             <PdfPreview data={previewBlob} name={descriptor.name} />
+          )}
+          {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
+            <div className="modal-text-preview">
+              <pre tabIndex={0} dir="auto" aria-label={`${descriptor.name} text content`}>
+                {previewText === '' ? 'This text file is empty.' : previewText}
+              </pre>
+            </div>
           )}
         </SecurityDialog>
       )}
       {previewType === 'none' && descriptor.size > PREVIEW_LIMIT_BYTES && (
-        <p className="attachment-note">To limit memory use, attachments larger than 64 MB can only be downloaded.</p>
+        <p className="attachment-note">To protect browser memory, files over 64 MB are available as downloads only.</p>
       )}
+      {previewType === 'none' &&
+        isPlainTextType(descriptor.mimeType) &&
+        descriptor.size > TEXT_PREVIEW_LIMIT_BYTES &&
+        descriptor.size <= PREVIEW_LIMIT_BYTES && (
+          <p className="attachment-note">Text previews are limited to 1 MB. Download this file to read it in full.</p>
+        )}
     </section>
   )
 }

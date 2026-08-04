@@ -1,5 +1,4 @@
 /*
-  Cache-Control: no-store
   Content-Security-Policy: default-src 'self'; base-uri 'none'; object-src 'none'; frame-src blob:; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Resource-Policy: same-origin
@@ -8,6 +7,12 @@
   Strict-Transport-Security: max-age=31536000
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
+
+/
+  Cache-Control: no-store
+
+/r/*
+  Cache-Control: no-store
 
 /index.html
   Cache-Control: no-store

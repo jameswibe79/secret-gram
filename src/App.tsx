@@ -4,6 +4,11 @@ import './App.css'
 import { AccessScreen } from './components/AccessScreen'
 import { RoomWorkspace } from './components/RoomWorkspace'
 import type { ActiveRoomSession } from './lib/session'
+import {
+  parseRoomInvitation,
+  roomPath,
+  type RoomInvitation,
+} from './lib/room-crypto'
 
 type AppTheme = 'day' | 'night'
 
@@ -19,29 +24,32 @@ function initialTheme(): AppTheme {
   return window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'day' : 'night'
 }
 
-function initialRoomCode(): string {
-  const fragment = window.location.hash.slice(1)
-  if (!fragment) return ''
-  const params = new URLSearchParams(fragment)
-  const code = params.get('room') ?? fragment
-  window.history.replaceState(
-    window.history.state,
-    '',
-    `${window.location.pathname}${window.location.search}`,
-  )
-  return code
+function initialRoomInvitation(): RoomInvitation | null {
+  if (!/^\/r\//iu.test(window.location.pathname)) return null
+  try {
+    const invitation = parseRoomInvitation(`${window.location.pathname}${window.location.hash}`)
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${roomPath(invitation.roomId)}${window.location.search}`,
+    )
+    return invitation
+  } catch {
+    window.history.replaceState(window.history.state, '', `/${window.location.search}`)
+    return null
+  }
 }
 
 function App() {
   const [session, setSession] = useState<ActiveRoomSession | null>(null)
-  const [invitedCode, setInvitedCode] = useState(initialRoomCode)
+  const [invitation, setInvitation] = useState<RoomInvitation | null>(initialRoomInvitation)
   const [theme, setTheme] = useState<AppTheme>(initialTheme)
 
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = theme
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute(
       'content',
-      theme === 'day' ? '#f4f3ed' : '#090a0a',
+      theme === 'day' ? '#eef1dc' : '#14231f',
     )
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme)
@@ -52,15 +60,18 @@ function App() {
 
   function enterRoom(nextSession: ActiveRoomSession) {
     setSession(nextSession)
-    setInvitedCode('')
-    if (window.location.hash) {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
-    }
+    setInvitation(null)
+    window.history.replaceState(
+      null,
+      '',
+      `${roomPath(nextSession.roomId)}${window.location.search}`,
+    )
   }
 
   function leaveRoom() {
     setSession(null)
-    setInvitedCode('')
+    setInvitation(null)
+    window.history.replaceState(null, '', `/${window.location.search}`)
   }
 
   const toggleTheme = () => setTheme((current) => current === 'night' ? 'day' : 'night')
@@ -68,7 +79,7 @@ function App() {
   if (session === null) {
     return (
       <AccessScreen
-        initialRoomCode={invitedCode}
+        initialInvitation={invitation}
         onSession={enterRoom}
         theme={theme}
         onToggleTheme={toggleTheme}

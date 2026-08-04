@@ -17,6 +17,24 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(',')
 
+
+export function SecurityIcon() {
+  return (
+    <svg
+      className="security-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3 19 6v5c0 4.6-2.8 8-7 10-4.2-2-7-5.4-7-10V6l7-3Z" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  )
+}
 export function SecurityDialog({
   title,
   onClose,

@@ -6,7 +6,7 @@ import {
   decryptMessage,
   encryptMessage,
 } from './message-crypto'
-import { deriveRoomSecrets } from './room-crypto'
+import { deriveRoomSecrets, generateRoomKey } from './room-crypto'
 
 function textMessage(): Extract<PlainMessage, { kind: 'text' }> {
   return {
@@ -39,7 +39,7 @@ describe('message encryption', () => {
   })
 
   it('round-trips a structured message with a per-sender AES-256-GCM key', async () => {
-    const keys = await deriveRoomSecrets(crypto.getRandomValues(new Uint8Array(15)))
+    const keys = await deriveRoomSecrets('ABC123', generateRoomKey())
     const message = textMessage()
     const sender = await createMessageSender(keys.messageRoot, keys.locator)
 
@@ -52,7 +52,7 @@ describe('message encryption', () => {
   })
 
   it('rejects tampered ciphertext', async () => {
-    const keys = await deriveRoomSecrets(crypto.getRandomValues(new Uint8Array(15)))
+    const keys = await deriveRoomSecrets('ABC123', generateRoomKey())
     const sender = await createMessageSender(keys.messageRoot, keys.locator)
     const envelope = await encryptMessage(sender, keys.locator, textMessage())
     const replacement = envelope.ciphertext.endsWith('A') ? 'B' : 'A'
@@ -66,7 +66,7 @@ describe('message encryption', () => {
   })
 
   it('binds visible metadata and the room locator into authenticated data', async () => {
-    const keys = await deriveRoomSecrets(crypto.getRandomValues(new Uint8Array(15)))
+    const keys = await deriveRoomSecrets('ABC123', generateRoomKey())
     const sender = await createMessageSender(keys.messageRoot, keys.locator)
     const envelope = await encryptMessage(sender, keys.locator, textMessage())
 
@@ -88,7 +88,7 @@ describe('message encryption', () => {
   })
 
   it('allocates a unique counter before concurrent encryption starts', async () => {
-    const keys = await deriveRoomSecrets(crypto.getRandomValues(new Uint8Array(15)))
+    const keys = await deriveRoomSecrets('ABC123', generateRoomKey())
     const sender = await createMessageSender(keys.messageRoot, keys.locator)
     const envelopes = await Promise.all(
       Array.from({ length: 32 }, () => encryptMessage(sender, keys.locator, textMessage())),
@@ -101,9 +101,9 @@ describe('message encryption', () => {
   })
 
   it('decrypts after re-deriving the room root on a second device', async () => {
-    const roomSecret = crypto.getRandomValues(new Uint8Array(15))
-    const firstDevice = await deriveRoomSecrets(roomSecret)
-    const secondDevice = await deriveRoomSecrets(roomSecret)
+    const roomKey = generateRoomKey()
+    const firstDevice = await deriveRoomSecrets('ABC123', roomKey)
+    const secondDevice = await deriveRoomSecrets('ABC123', roomKey)
     const sender = await createMessageSender(firstDevice.messageRoot, firstDevice.locator)
     const message = textMessage()
 

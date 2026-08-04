@@ -21,7 +21,7 @@ vi.mock('./PdfPreview', () => ({
 const descriptor: FileDescriptor = {
   fileId: '00000000-0000-4000-8000-000000000001',
   name: 'evidence.txt',
-  mimeType: 'text/plain',
+  mimeType: 'application/octet-stream',
   size: 4,
   chunkSize: 4,
   chunkCount: 1,
@@ -78,7 +78,81 @@ describe('Attachment lifecycle', () => {
     click.mockRestore()
   })
 
-  it('shows a real PDF thumbnail and opens the responsive PDF viewer', async () => {
+  it('opens a progress-focused preview immediately and supports cancellation', async () => {
+    vi.mocked(downloadDecryptedFile).mockImplementation((_descriptor, _credentials, options) => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          options?.signal?.addEventListener(
+            'abort',
+            () => controller.error(new DOMException('Operation canceled', 'AbortError')),
+            { once: true },
+          )
+        },
+      })
+      return new Response(stream).blob()
+    })
+    const user = userEvent.setup()
+    render(
+      <Attachment
+        descriptor={{ ...descriptor, name: 'diagram.png', mimeType: 'image/png', size: 9 * 1024 * 1024 }}
+        credentials={credentials}
+      />,
+    )
+    expect(downloadDecryptedFile).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Open diagram.png preview' }))
+    expect(screen.getByRole('dialog', { name: 'diagram.png' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Preparing your preview' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel preview' }))
+    expect(await screen.findByRole('heading', { name: 'Preview could not be prepared' })).toBeInTheDocument()
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('shows escaped plain text inline and in the full browser-local viewer', async () => {
+    const text = 'A quiet line from the meadow.\n<script>alert("not markup")</script>\n終わり'
+    vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob([text], { type: 'text/plain' }))
+    const user = userEvent.setup()
+    render(
+      <Attachment
+        descriptor={{ ...descriptor, name: 'notes.txt', mimeType: 'text/plain', size: text.length }}
+        credentials={credentials}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(document.querySelector('.text-preview-snippet')).toHaveTextContent('A quiet line from the meadow.')
+    })
+    expect(document.querySelector('.text-preview-snippet script')).toBeNull()
+    expect(downloadDecryptedFile).toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: 'Open notes.txt preview' }))
+    expect(await screen.findByRole('dialog', { name: 'notes.txt' })).toBeInTheDocument()
+    expect(screen.getByText('Plain-text preview')).toBeInTheDocument()
+    expect(screen.getByLabelText('notes.txt text content')).toHaveTextContent('<script>alert("not markup")</script>')
+    expect(screen.getByRole('link', { name: 'Open in new tab' })).toHaveAttribute('href', 'blob:test')
+    expect(document.querySelector('.modal-text-preview script')).toBeNull()
+  })
+
+  it('keeps plain-text files over 1 MB download-only', () => {
+    render(
+      <Attachment
+        descriptor={{
+          ...descriptor,
+          name: 'large.txt',
+          mimeType: 'text/plain',
+          size: 1024 * 1024 + 1,
+        }}
+        credentials={credentials}
+      />,
+    )
+
+    expect(screen.getByText('Text previews are limited to 1 MB. Download this file to read it in full.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open large.txt preview' })).not.toBeInTheDocument()
+    expect(downloadDecryptedFile).not.toHaveBeenCalled()
+  })
+
+  it('shows an automatic PDF thumbnail and keeps the full viewer one click away', async () => {
     vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }))
     const user = userEvent.setup()
     render(
@@ -87,18 +161,17 @@ describe('Attachment lifecycle', () => {
         credentials={credentials}
       />,
     )
+
     expect(await screen.findByTestId('pdf-thumbnail')).toHaveAttribute('data-preview-bytes', '3')
-    expect(await screen.findByTestId('pdf-thumbnail')).toBeInTheDocument()
-    const trigger = screen.getByRole('button', { name: 'Open document.pdf preview' })
-    await waitFor(() => expect(trigger).toBeEnabled())
-    await user.click(trigger)
+    expect(downloadDecryptedFile).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Open document.pdf preview' }))
 
     expect(screen.getByLabelText('document.pdf PDF viewer')).toHaveAttribute('data-preview-bytes', '3')
-    expect(screen.getByLabelText('document.pdf PDF viewer')).toBeInTheDocument()
+    expect(screen.queryByTestId('pdf-thumbnail')).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open in new tab' })).toHaveAttribute('href', 'blob:test')
   })
 
-  it('opens image previews from the compact tile and releases the blob on unmount', async () => {
+  it('shows automatic image previews, opens the full viewer, and releases the blob', async () => {
     vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['image'], { type: 'image/png' }))
     const user = userEvent.setup()
 
@@ -114,9 +187,8 @@ describe('Attachment lifecycle', () => {
     await waitFor(() => {
       expect(document.querySelector('.preview-thumb img')).toHaveAttribute('src', 'blob:test')
     })
-    const trigger = screen.getByRole('button', { name: 'Open diagram.png preview' })
-    await waitFor(() => expect(trigger).toBeEnabled())
-    await user.click(trigger)
+    expect(downloadDecryptedFile).toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: 'Open diagram.png preview' }))
 
     expect(await screen.findByRole('dialog', { name: 'diagram.png' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'diagram.png' })).toBeInTheDocument()

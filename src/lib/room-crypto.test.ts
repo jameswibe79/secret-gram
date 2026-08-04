@@ -1,61 +1,76 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  deriveRoomKeyFromPassword,
   deriveRoomSecrets,
-  formatRoomCodeFromSecret,
-  generateRoomCode,
-  parseRoomCode,
+  generateRoomId,
+  generateRoomKey,
+  parseRoomId,
+  parseRoomInvitation,
+  parseRoomKey,
+  roomPath,
 } from './room-crypto'
 
-describe('room codes', () => {
-  it('generates a 120-bit human-readable room code with a checksum', async () => {
-    const code = await generateRoomCode()
+describe('room addressing', () => {
+  it('generates a six-character Crockford room ID', () => {
+    const roomId = generateRoomId()
 
-    expect(code).toMatch(
-      /^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){5}-[0-9A-HJKMNP-TV-Z]{2}$/,
-    )
-    expect(parseRoomCode(code)).toHaveLength(15)
+    expect(roomId).toMatch(/^[0-9A-HJKMNP-TV-Z]{6}$/)
+    expect(roomPath(roomId)).toBe(`/r/${roomId}`)
   })
 
-  it('accepts lowercase, whitespace, and Crockford aliases', async () => {
-    const secret = new Uint8Array(15)
-    const code = await formatRoomCodeFromSecret(secret)
-    const humanInput = code.toLowerCase().replaceAll('0', 'o').replaceAll('-', ' ')
-
-    expect(parseRoomCode(humanInput)).toEqual(secret)
+  it('accepts paths, lowercase input, and Crockford aliases', () => {
+    expect(parseRoomId('/r/oilabc')).toBe('011ABC')
+    expect(parseRoomId('https://secret.example/r/abc123')).toBe('ABC123')
   })
 
-  it('rejects a mistyped checksum', async () => {
-    const code = await generateRoomCode()
-    const replacement = code.endsWith('0') ? '1' : '0'
+  it('rejects malformed or short room IDs', () => {
+    expect(() => parseRoomId('1234')).toThrow('six letters or numbers')
+    expect(() => parseRoomId('/rooms/ABC123')).toThrow('six letters or numbers')
+  })
 
-    expect(() => parseRoomCode(`${code.slice(0, -1)}${replacement}`)).toThrow(
-      'Room code checksum failed',
+  it('keeps the 128-bit invitation key in the URL fragment', () => {
+    const roomKey = generateRoomKey()
+    const invitation = parseRoomInvitation(
+      `https://secret.example/r/ABC123#${new URLSearchParams({ key: roomKey })}`,
     )
+
+    expect(parseRoomKey(roomKey)).toBe(roomKey)
+    expect(roomKey).toMatch(/^[A-Za-z0-9_-]{22}$/)
+    expect(invitation).toEqual({ roomId: 'ABC123', roomKey })
   })
 })
 
 describe('room key derivation', () => {
-  it('matches the protocol-v2 zero-secret release vector', async () => {
-    const secret = new Uint8Array(15)
-    const derived = await deriveRoomSecrets(secret)
+  it('matches the protocol-v3 zero-key release vector', async () => {
+    const derived = await deriveRoomSecrets('000000', 'A'.repeat(22))
 
-    expect(await formatRoomCodeFromSecret(secret)).toBe('0000-0000-0000-0000-0000-0000-00')
-    expect(derived.locator).toBe('cayZeEBmy_ieNL0qWzAIpl_ItaAE_YRuuDcyrk9wOJ8')
-    expect(derived.authToken).toBe('zmWmVOTMgu2cIkelbxWq9xepoUC5BplpZXDNXbLuFes')
-    expect(derived.authVerifier).toBe('h3gl9VyVIVK08mGPMCvBp7FPGJepDR6ggMpgxzhRfWk')
+    expect(derived.locator).toBe('P879icD8_cUFt9vhqkmXQoQtRZYNO_hrSpsv1kGvBR0')
+    expect(derived.authToken).toBe('rw0hBg1j7YKxfKbobDf5nbpidxL3XaJhV81Bkm5aexw')
+    expect(derived.authVerifier).toBe('IKMILNdgp8hp5MW6rEPYmoSzWbDn-EquhO2GUDARGi8')
   })
 
-  it('is deterministic and domain-separates routing, authentication, and content keys', async () => {
-    const secret = crypto.getRandomValues(new Uint8Array(15))
-    const first = await deriveRoomSecrets(secret)
-    const second = await deriveRoomSecrets(secret)
+  it('derives a room-bound key from a password without exposing the password', async () => {
+    const first = await deriveRoomKeyFromPassword('ABC123', 'correct horse battery staple')
+    const second = await deriveRoomKeyFromPassword('ABC123', 'correct horse battery staple')
+    const otherRoom = await deriveRoomKeyFromPassword('XYZ789', 'correct horse battery staple')
+
+    expect(first).toBe(second)
+    expect(first).not.toBe(otherRoom)
+    expect(first).not.toContain('correct')
+  })
+
+  it('domain-separates routing, authentication, and content keys', async () => {
+    const roomKey = generateRoomKey()
+    const first = await deriveRoomSecrets('ABC123', roomKey)
+    const second = await deriveRoomSecrets('ABC123', roomKey)
+    const wrongKey = await deriveRoomSecrets('ABC123', generateRoomKey())
 
     expect(first.locator).toBe(second.locator)
+    expect(first.locator).toBe(wrongKey.locator)
     expect(first.authToken).toBe(second.authToken)
-    expect(first.authVerifier).toBe(second.authVerifier)
+    expect(first.authToken).not.toBe(wrongKey.authToken)
     expect(first.locator).not.toBe(first.authToken)
-    expect(first.authVerifier).not.toBe(first.authToken)
     expect(first.messageRoot.type).toBe('secret')
     expect(first.messageRoot.algorithm.name).toBe('HKDF')
     expect(first.messageRoot.extractable).toBe(false)

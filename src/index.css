@@ -1,41 +1,47 @@
 :root {
-  --canvas: #090a0a;
-  --surface: #101211;
-  --surface-subtle: #0c0e0d;
-  --surface-raised: #141715;
-  --text: #f2f0e8;
-  --text-muted: #a2a8a1;
-  --text-soft: #6f776f;
-  --border: #252a26;
-  --border-strong: #394139;
-  --accent: #7dff4f;
-  --accent-hover: #a4ff82;
-  --accent-soft: rgb(125 255 79 / 8%);
-  --accent-border: rgb(125 255 79 / 34%);
-  --accent-glow: rgb(125 255 79 / 10%);
-  --danger: #ff8585;
-  --danger-soft: rgb(255 100 100 / 9%);
-  --danger-border: rgb(255 133 133 / 32%);
-  --warning: #f2c86b;
-  --warning-soft: rgb(242 200 107 / 9%);
-  --warning-border: rgb(242 200 107 / 24%);
-  --success: #7dff4f;
-  --accent-contrast: #090a0a;
-  --focus-ring: rgb(125 255 79 / 70%);
-  --grid-line: rgb(125 255 79 / 3.5%);
-  --header-surface: rgb(9 10 10 / 84%);
-  --panel-surface: rgb(16 18 17 / 88%);
-  --panel-surface-strong: rgb(16 18 17 / 94%);
-  --field-surface: rgb(9 10 10 / 72%);
-  --workspace-surface: rgb(9 10 10 / 72%);
-  --preview-surface: #151816;
-  --preview-checker: rgb(255 255 255 / 4%);
-  --modal-backdrop: rgb(0 0 0 / 76%);
+  --canvas: #14231f;
+  --canvas-deep: #0e1917;
+  --surface: #1d3029;
+  --surface-subtle: #182922;
+  --surface-raised: #243a31;
+  --text: #fff9e9;
+  --text-muted: #c4c8b4;
+  --text-soft: #929b89;
+  --border: rgb(230 225 192 / 14%);
+  --border-strong: rgb(230 225 192 / 27%);
+  --accent: #a8cb83;
+  --accent-hover: #c1df9f;
+  --accent-soft: rgb(168 203 131 / 13%);
+  --accent-border: rgb(168 203 131 / 38%);
+  --accent-glow: rgb(168 203 131 / 16%);
+  --secondary: #edc27a;
+  --secondary-soft: rgb(237 194 122 / 13%);
+  --sky: #779ca4;
+  --blush: #db947f;
+  --danger: #ef9b8d;
+  --danger-soft: rgb(239 155 141 / 11%);
+  --danger-border: rgb(239 155 141 / 38%);
+  --warning: #edc27a;
+  --warning-soft: rgb(237 194 122 / 11%);
+  --warning-border: rgb(237 194 122 / 30%);
+  --success: #a8cb83;
+  --accent-contrast: #15231f;
+  --focus-ring: rgb(237 194 122 / 85%);
+  --header-surface: rgb(20 35 31 / 90%);
+  --panel-surface: rgb(29 48 41 / 90%);
+  --panel-surface-strong: rgb(29 48 41 / 97%);
+  --field-surface: rgb(14 25 23 / 62%);
+  --workspace-surface: rgb(18 31 27 / 64%);
+  --preview-surface: #172823;
+  --preview-checker: rgb(255 249 233 / 5%);
+  --modal-backdrop: rgb(7 14 12 / 78%);
   --color-scheme: dark;
-  --shadow-small: none;
-  --shadow-modal: 0 28px 90px rgb(0 0 0 / 55%);
-  --sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --shadow-small: 0 12px 38px rgb(6 14 12 / 22%);
+  --shadow-card: 0 20px 70px rgb(6 14 12 / 26%);
+  --shadow-modal: 0 28px 90px rgb(4 10 8 / 58%);
+  --sans: "Avenir Next", Avenir, "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --serif: Iowan Old Style, "Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif;
+  --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-family: var(--sans);
   color: var(--text);
   background: var(--canvas);
@@ -47,40 +53,46 @@
 }
 
 :root[data-theme='day'] {
-  --canvas: #f4f3ed;
-  --surface: #fbfaf6;
-  --surface-subtle: #edeee7;
-  --surface-raised: #fffefa;
-  --text: #182019;
-  --text-muted: #566158;
-  --text-soft: #768077;
-  --border: #d2d8d1;
-  --border-strong: #aab5aa;
-  --accent: #267a35;
-  --accent-hover: #1d6129;
-  --accent-glow: rgb(38 122 53 / 12%);
-  --accent-soft: rgb(38 122 53 / 8%);
-  --accent-border: rgb(38 122 53 / 36%);
-  --danger-border: rgb(165 63 63 / 30%);
-  --danger: #a53f3f;
-  --danger-soft: rgb(165 63 63 / 8%);
-  --warning-border: rgb(138 98 22 / 28%);
-  --warning: #8a6216;
-  --warning-soft: rgb(138 98 22 / 9%);
-  --success: #267a35;
-  --accent-contrast: #fffefa;
-  --focus-ring: rgb(38 122 53 / 65%);
-  --grid-line: rgb(38 122 53 / 5%);
-  --header-surface: rgb(244 243 237 / 88%);
-  --panel-surface: rgb(251 250 246 / 92%);
-  --panel-surface-strong: rgb(251 250 246 / 97%);
-  --field-surface: rgb(255 254 250 / 92%);
-  --workspace-surface: rgb(240 241 235 / 78%);
-  --preview-surface: #e7e9e3;
-  --modal-backdrop: rgb(24 32 25 / 48%);
-  --preview-checker: rgb(24 32 25 / 6%);
-  --shadow-modal: 0 28px 90px rgb(24 32 25 / 24%);
+  --canvas: #eef1dc;
+  --canvas-deep: #dde5c9;
+  --surface: #fffaf0;
+  --surface-subtle: #f2eddb;
+  --surface-raised: #fffdf6;
+  --text: #2f4438;
+  --text-muted: #657266;
+  --text-soft: #899184;
+  --border: #d9d5bd;
+  --border-strong: #bbbda5;
+  --accent: #4f7958;
+  --accent-hover: #3d6548;
+  --accent-soft: rgb(79 121 88 / 10%);
+  --accent-border: rgb(79 121 88 / 32%);
+  --accent-glow: rgb(79 121 88 / 12%);
+  --secondary: #d89949;
+  --secondary-soft: rgb(216 153 73 / 11%);
+  --sky: #9bc6cc;
+  --blush: #c87967;
+  --danger: #a94f45;
+  --danger-soft: rgb(169 79 69 / 9%);
+  --danger-border: rgb(169 79 69 / 28%);
+  --warning: #91651e;
+  --warning-soft: rgb(145 101 30 / 9%);
+  --warning-border: rgb(145 101 30 / 24%);
+  --success: #4f7958;
+  --accent-contrast: #fffdf6;
+  --focus-ring: rgb(145 101 30 / 65%);
+  --header-surface: rgb(238 241 220 / 88%);
+  --panel-surface: rgb(255 250 240 / 90%);
+  --panel-surface-strong: rgb(255 250 240 / 97%);
+  --field-surface: rgb(255 253 246 / 92%);
+  --workspace-surface: rgb(236 238 216 / 70%);
+  --preview-surface: #e7ead6;
+  --preview-checker: rgb(47 68 56 / 6%);
+  --modal-backdrop: rgb(37 55 45 / 52%);
   --color-scheme: light;
+  --shadow-small: 0 10px 32px rgb(66 78 57 / 9%);
+  --shadow-card: 0 22px 70px rgb(66 78 57 / 13%);
+  --shadow-modal: 0 28px 90px rgb(37 55 45 / 25%);
 }
 
 * {
@@ -100,10 +112,11 @@ body {
   min-height: 100svh;
   background-color: var(--canvas);
   background-image:
-    linear-gradient(var(--grid-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-position: -1px -1px;
-  background-size: 32px 32px;
+    radial-gradient(circle at 16% 10%, rgb(255 255 255 / 9%) 0 1px, transparent 1.6px),
+    radial-gradient(circle at 78% 30%, rgb(255 255 255 / 6%) 0 1px, transparent 1.5px),
+    linear-gradient(145deg, transparent 0 48%, rgb(255 255 255 / 2.5%) 49%, transparent 51%),
+    linear-gradient(180deg, var(--canvas) 0%, var(--canvas-deep) 100%);
+  background-size: 31px 31px, 47px 47px, 240px 240px, auto;
   background-attachment: fixed;
 }
 
@@ -114,14 +127,14 @@ textarea {
   font: inherit;
 }
 
-button {
-  color: inherit;
-}
-
 button,
 label,
 select {
   -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  color: inherit;
 }
 
 button:focus-visible,
@@ -130,13 +143,13 @@ select:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
 object:focus-visible {
-  outline: 2px solid var(--focus-ring);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }
 
 ::selection {
   color: var(--accent-contrast);
-  background: var(--accent);
+  background: var(--secondary);
 }
 
 @media (prefers-reduced-motion: reduce) {
