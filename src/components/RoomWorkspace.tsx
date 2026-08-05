@@ -52,6 +52,15 @@ function statusLabel(status: ReturnType<typeof useRoomChannel>['status']): strin
   return 'Connecting'
 }
 
+function PinIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 3h6l-1 7 3 3v2H7v-2l3-3-1-7Z" />
+      <path d="M12 15v6" />
+    </svg>
+  )
+}
+
 function formatTime(timestamp: number): string {
   try {
     return new Intl.DateTimeFormat('en-US', {
@@ -491,10 +500,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
         <div className="timeline" aria-label="Encrypted messages">
           {pinnedMessage !== null && (
             <aside className="pinned-message" aria-label="Pinned message">
-              <span className="pinned-mark">Pinned</span>
+              <span className="pinned-icon" aria-hidden="true"><PinIcon /></span>
               <button
                 type="button"
                 className="pinned-summary"
+                aria-label="Jump to pinned message"
                 onClick={() => {
                   document.getElementById(`message-${pinnedMessage.id}`)?.scrollIntoView({
                     block: 'center',
@@ -502,8 +512,12 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
                   })
                 }}
               >
-                <strong>{pinnedMessage.content?.senderName ?? 'Unverified sender'}</strong>
-                <span>
+                <span className="pinned-context">
+                  <span className="pinned-eyebrow">Pinned message</span>
+                  <span aria-hidden="true">·</span>
+                  <strong>{pinnedMessage.content?.senderName ?? 'Unverified sender'}</strong>
+                </span>
+                <span className="pinned-preview">
                   {pinnedMessage.content?.kind === 'text'
                     ? pinnedMessage.content.text
                     : pinnedMessage.content?.kind === 'file'
@@ -513,11 +527,12 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
               </button>
               <button
                 type="button"
-                className="inline-button pinned-remove"
+                className="pinned-remove"
+                aria-label="Unpin message"
                 disabled={pinningMessageId !== null}
                 onClick={() => void updatePin(pinnedMessage.id, false)}
               >
-                {pinningMessageId === pinnedMessage.id ? 'Unpinning…' : 'Unpin'}
+                {pinningMessageId === pinnedMessage.id ? 'Working…' : 'Unpin'}
               </button>
             </aside>
           )}
@@ -540,11 +555,12 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
             const own = message.senderId === session.deviceId
             const content = message.content
             const recalled = message.recalledAt !== undefined
+            const pinned = pinnedMessageId === message.id
             const displayTimestamp =
               message.recalledAt ?? content?.clientCreatedAt ?? message.serverCreatedAt ?? Date.now()
             return (
               <article
-                className={`${own ? 'message own' : 'message'}${pinnedMessageId === message.id ? ' is-pinned' : ''}`}
+                className={`${own ? 'message own' : 'message'}${pinned ? ' is-pinned' : ''}`}
                 id={`message-${message.id}`}
                 key={message.id}
               >
@@ -553,6 +569,12 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
                     {content?.senderName ?? (recalled ? own ? 'You' : 'A participant' : 'Unverified sender')}
                   </strong>
                   {own && <span className="own-label">This device</span>}
+                  {pinned && (
+                    <span className="message-pinned-label">
+                      <PinIcon />
+                      Pinned
+                    </span>
+                  )}
                   <time dateTime={new Date(displayTimestamp).toISOString()}>
                     {formatTime(displayTimestamp)}
                   </time>
@@ -579,11 +601,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
                           type="button"
                           className="inline-button pin-button"
                           disabled={pinningMessageId !== null}
-                          onClick={() => void updatePin(message.id, pinnedMessageId !== message.id)}
+                          onClick={() => void updatePin(message.id, !pinned)}
                         >
                           {pinningMessageId === message.id
-                            ? pinnedMessageId === message.id ? 'Unpinning…' : 'Pinning…'
-                            : pinnedMessageId === message.id ? 'Unpin' : 'Pin'}
+                            ? pinned ? 'Unpinning…' : 'Pinning…'
+                            : pinned ? 'Unpin' : 'Pin'}
                         </button>
                       )}
                       {own && message.recallToken !== undefined && (

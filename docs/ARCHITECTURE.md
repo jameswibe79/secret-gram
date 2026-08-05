@@ -164,7 +164,7 @@ R2 and Durable Object SQLite do not provide a cross-service transaction. The flo
 4. record its metadata in SQLite;
 5. remove a newly created object if the SQLite transition is rejected.
 
-A file becomes downloadable only after every chunk is recorded and the declared encrypted total matches. Downloads stream ciphertext from R2 through the Worker. The browser decrypts each chunk and builds a local Blob. Images and PDFs are previewed only through local Blob URLs.
+A file becomes downloadable only after every chunk is recorded and the declared encrypted total matches. Downloads stream ciphertext from R2 through the Worker. The browser decrypts each chunk and builds a local Blob. Images are rendered from local Blob URLs; PDFs are handed to the browser's native PDF viewer through a local Blob URL so supported browser features such as text selection and accessibility remain available.
 
 ## Retention and cleanup
 

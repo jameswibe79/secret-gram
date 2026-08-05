@@ -12,12 +12,6 @@ vi.mock('../lib/file-transfer', async (importOriginal) => {
   return { ...actual, downloadDecryptedFile: vi.fn() }
 })
 
-vi.mock('./PdfPreview', () => ({
-  PdfPreview: ({ compact, name, data }: { compact?: boolean; name: string; data: Blob }) => compact
-    ? <canvas data-testid="pdf-thumbnail" data-preview-bytes={data.size} />
-    : <div aria-label={`${name} PDF viewer`} data-preview-bytes={data.size}>Rendered PDF page</div>,
-}))
-
 const descriptor: FileDescriptor = {
   fileId: '00000000-0000-4000-8000-000000000001',
   name: 'evidence.txt',
@@ -152,7 +146,7 @@ describe('Attachment lifecycle', () => {
     expect(downloadDecryptedFile).not.toHaveBeenCalled()
   })
 
-  it('shows an automatic PDF thumbnail and keeps the full viewer one click away', async () => {
+  it('opens decrypted PDFs in the browser-native viewer', async () => {
     vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }))
     const user = userEvent.setup()
     render(
@@ -162,13 +156,16 @@ describe('Attachment lifecycle', () => {
       />,
     )
 
-    expect(await screen.findByTestId('pdf-thumbnail')).toHaveAttribute('data-preview-bytes', '3')
+    expect(await screen.findByText('PDF ready')).toBeInTheDocument()
     expect(downloadDecryptedFile).toHaveBeenCalled()
+    expect(document.querySelector('canvas')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Open document.pdf preview' }))
 
-    expect(screen.getByLabelText('document.pdf PDF viewer')).toHaveAttribute('data-preview-bytes', '3')
-    expect(screen.queryByTestId('pdf-thumbnail')).not.toBeInTheDocument()
-    expect(screen.getByRole('link', { name: 'Open in new tab' })).toHaveAttribute('href', 'blob:test')
+    const viewer = screen.getByTitle('document.pdf browser PDF viewer')
+    expect(viewer).toHaveAttribute('src', 'blob:test')
+    expect(viewer).toHaveClass('native-pdf-preview')
+    expect(screen.getByText('PDF preview · browser viewer')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open in browser' })).toHaveAttribute('href', 'blob:test')
   })
 
   it('shows automatic image previews, opens the full viewer, and releases the blob', async () => {

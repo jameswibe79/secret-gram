@@ -262,9 +262,13 @@ describe('SecretGram application', () => {
       true,
     ))
     const banner = await screen.findByLabelText('Pinned message')
+    expect(banner).toHaveTextContent('Pinned message')
     expect(banner).toHaveTextContent('Keep this in view')
+    expect(within(banner).getByRole('button', { name: 'Jump to pinned message' })).toBeInTheDocument()
+    expect(document.querySelector('article.is-pinned')).toBeInTheDocument()
+    expect(screen.getByText('Pinned', { selector: '.message-pinned-label' })).toBeInTheDocument()
 
-    await user.click(within(banner).getByRole('button', { name: 'Unpin' }))
+    await user.click(within(banner).getByRole('button', { name: 'Unpin message' }))
     await waitFor(() => expect(setRoomPin).toHaveBeenLastCalledWith(
       expect.any(String),
       expect.any(String),

@@ -177,7 +177,7 @@ Use two independent browser profiles, not two tabs sharing extension or process 
 5. A sends text; B decrypts it.
 6. B replies; A decrypts it.
 7. Upload a small PNG and verify local image preview in both browsers.
-8. Upload a small PDF and verify the browser-local PDF preview.
+8. Upload a small PDF and verify the decrypted Blob opens in the browser-native PDF viewer; confirm selectable text or browser OCR when the test browser supports it.
 9. Upload a generic file and verify its downloaded bytes or checksum locally.
 10. Pin a retained message in Browser A and verify Browser B receives the pin, can replace or clear it, and restores the current pin after reload.
 11. Reload Browser B and verify history catch-up and attachment decryption.

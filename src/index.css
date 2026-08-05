@@ -142,6 +142,7 @@ input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
 a:focus-visible,
+iframe:focus-visible,
 object:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;

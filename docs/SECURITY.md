@@ -128,7 +128,7 @@ The digest is not a substitute for AES-GCM authentication. It lets the service c
 
 ## Browser content security
 
-Static responses set a CSP and related headers. The application uses system fonts and local assets only. Blob sources are allowed specifically for decrypted image and PDF previews. No analytics or third-party runtime script is required.
+Static responses set a CSP and related headers. The application uses system fonts and local assets only. Blob sources are allowed specifically for decrypted image and PDF previews. Decrypted PDFs are processed by the browser's native PDF viewer inside the endpoint trust boundary; no PDF content is sent to an external viewer or CDN by the application. No analytics or third-party runtime script is required.
 
 A CSP reduces exploitation opportunities but does not make a malicious first-party deployment safe.
 

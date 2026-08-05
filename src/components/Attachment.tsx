@@ -242,8 +242,12 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
             >
               {previewType === 'image' && objectUrl ? (
                 <img src={objectUrl} alt="" />
-              ) : previewType === 'pdf' && previewBlob && !previewOpen ? (
-                <PdfPreview data={previewBlob} name={descriptor.name} compact />
+              ) : previewType === 'pdf' && objectUrl ? (
+                <span className="preview-placeholder pdf-native-ready">
+                  <span className="preview-glyph" aria-hidden="true">PDF</span>
+                  <strong>PDF ready</strong>
+                  <small>Opens in your browser viewer</small>
+                </span>
               ) : previewType === 'text' && previewText !== null ? (
                 <span className="text-preview-snippet" dir="auto">
                   {previewText === '' ? 'Empty text file' : previewText.slice(0, INLINE_TEXT_CHARACTERS)}
@@ -310,7 +314,7 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
                 {previewType === 'image'
                   ? 'Image preview'
                   : previewType === 'pdf'
-                    ? 'PDF preview'
+                    ? 'PDF preview · browser viewer'
                     : 'Plain-text preview'}
               </strong>
               <span>{fileSize(descriptor.size)} · decrypted only in this browser</span>
@@ -319,7 +323,7 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
               <div className="preview-toolbar-actions">
                 <button type="button" className="small-button" onClick={download}>Download</button>
                 <a className="small-button primary-soft" href={objectUrl} target="_blank" rel="noopener noreferrer">
-                  {previewType === 'image' ? 'Open full size' : 'Open in new tab'}
+                  {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser' : 'Open in new tab'}
                 </a>
               </div>
             )}
@@ -350,7 +354,7 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
             </div>
           )}
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
-            <PdfPreview data={previewBlob} name={descriptor.name} />
+            <PdfPreview url={objectUrl} name={descriptor.name} />
           )}
           {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
             <div className="modal-text-preview">
