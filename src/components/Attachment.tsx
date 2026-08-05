@@ -242,12 +242,8 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
             >
               {previewType === 'image' && objectUrl ? (
                 <img src={objectUrl} alt="" />
-              ) : previewType === 'pdf' && objectUrl ? (
-                <span className="preview-placeholder pdf-native-ready">
-                  <span className="preview-glyph" aria-hidden="true">PDF</span>
-                  <strong>PDF ready</strong>
-                  <small>Opens in your browser viewer</small>
-                </span>
+              ) : previewType === 'pdf' && objectUrl && previewBlob ? (
+                <PdfPreview data={previewBlob} name={descriptor.name} compact />
               ) : previewType === 'text' && previewText !== null ? (
                 <span className="text-preview-snippet" dir="auto">
                   {previewText === '' ? 'Empty text file' : previewText.slice(0, INLINE_TEXT_CHARACTERS)}

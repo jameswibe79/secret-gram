@@ -2095,14 +2095,43 @@ progress {
   border-radius: 16px 16px 16px 5px;
 }
 
-.pdf-native-ready {
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--accent) 15%, transparent), transparent 58%),
-    var(--preview-surface);
+.pdf-thumbnail-preview,
+.pdf-thumbnail-stage {
+  width: 100%;
+  height: 100%;
 }
 
-.pdf-native-ready .preview-glyph {
-  box-shadow: 0 8px 24px var(--accent-glow);
+.pdf-thumbnail-preview {
+  overflow: hidden;
+  background: var(--preview-surface);
+  pointer-events: none;
+}
+
+.pdf-thumbnail-stage {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  place-items: center;
+}
+
+.pdf-thumbnail-stage canvas {
+  display: block;
+  max-width: 100%;
+  background: #fff;
+  box-shadow: 0 7px 24px rgb(0 0 0 / 20%);
+}
+
+.pdf-thumbnail-status {
+  position: absolute;
+  align-self: center;
+  padding: 4px 6px;
+  color: var(--text-muted);
+  font-size: 9px;
+  text-align: center;
+}
+
+.pdf-thumbnail-status.is-error {
+  color: var(--danger);
 }
 
 .attachment-note {

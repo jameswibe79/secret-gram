@@ -12,6 +12,12 @@ vi.mock('../lib/file-transfer', async (importOriginal) => {
   return { ...actual, downloadDecryptedFile: vi.fn() }
 })
 
+vi.mock('./PdfPreview', () => ({
+  PdfPreview: ({ compact, name, url }: { compact?: boolean; name: string; url?: string }) => compact
+    ? <canvas aria-label={`${name} PDF thumbnail`} />
+    : <iframe className="native-pdf-preview" src={url} title={`${name} browser PDF viewer`} />,
+}))
+
 const descriptor: FileDescriptor = {
   fileId: '00000000-0000-4000-8000-000000000001',
   name: 'evidence.txt',
@@ -146,7 +152,7 @@ describe('Attachment lifecycle', () => {
     expect(downloadDecryptedFile).not.toHaveBeenCalled()
   })
 
-  it('opens decrypted PDFs in the browser-native viewer', async () => {
+  it('shows a local PDF thumbnail before opening the browser-native viewer', async () => {
     vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' }))
     const user = userEvent.setup()
     render(
@@ -156,14 +162,14 @@ describe('Attachment lifecycle', () => {
       />,
     )
 
-    expect(await screen.findByText('PDF ready')).toBeInTheDocument()
+    expect(await screen.findByLabelText('document.pdf PDF thumbnail')).toBeInTheDocument()
     expect(downloadDecryptedFile).toHaveBeenCalled()
-    expect(document.querySelector('canvas')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Open document.pdf preview' }))
 
     const viewer = screen.getByTitle('document.pdf browser PDF viewer')
     expect(viewer).toHaveAttribute('src', 'blob:test')
     expect(viewer).toHaveClass('native-pdf-preview')
+    expect(screen.getByLabelText('document.pdf PDF thumbnail')).toBeInTheDocument()
     expect(screen.getByText('PDF preview · browser viewer')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open in browser' })).toHaveAttribute('href', 'blob:test')
   })
