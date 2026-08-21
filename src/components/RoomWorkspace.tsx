@@ -7,7 +7,6 @@ import {
   Copy,
   DoorOpen,
   Ellipsis,
-  File,
   FileText,
   Files,
   LoaderCircle,
@@ -852,7 +851,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
                             </span>
                           ) : content?.kind === 'file' ? (
                             <span className="resource-summary">
-                              <File />
+                              <Attachment
+                                descriptor={content.file}
+                                credentials={credentials}
+                                presentation="thumbnail"
+                              />
                               <span>
                                 <strong title={content.file.name}>{content.file.name}</strong>
                                 <small>{formatFileSize(content.file.size)} · encrypted file</small>

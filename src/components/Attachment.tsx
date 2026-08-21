@@ -13,7 +13,7 @@ import { Button } from './ui/button'
 interface AttachmentProps {
   descriptor: FileDescriptor
   credentials: FileTransferCredentials
-  presentation?: 'card' | 'viewer'
+  presentation?: 'card' | 'thumbnail' | 'viewer'
 }
 
 const PREVIEW_LIMIT_BYTES = 64 * 1024 * 1024
@@ -239,6 +239,24 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
     }
   }
 
+  if (presentation === 'thumbnail') {
+    return (
+      <span
+        ref={attachmentRef}
+        className={`resource-file-thumbnail ${previewType}${loading ? ' loading' : ''}`}
+        aria-hidden="true"
+      >
+        {previewType === 'image' && objectUrl ? (
+          <img src={objectUrl} alt="" />
+        ) : previewType === 'pdf' && objectUrl && previewBlob ? (
+          <PdfPreview data={previewBlob} name={descriptor.name} compact />
+        ) : (
+          <span>{loading ? '…' : previewGlyph}</span>
+        )}
+      </span>
+    )
+  }
+
   if (presentation === 'viewer') {
     return (
       <section ref={attachmentRef} className="attachment attachment-viewer" aria-label={`File: ${descriptor.name}`}>
@@ -259,7 +277,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
               <Button asChild size="sm">
                 <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink />
-                  Open separately
+                  {previewType === 'pdf' ? 'Open in browser / OCR' : 'Open separately'}
                 </a>
               </Button>
             )}
@@ -316,7 +334,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             </div>
           )}
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
-            <PdfPreview url={objectUrl} name={descriptor.name} />
+            <PdfPreview data={previewBlob} name={descriptor.name} />
           )}
           {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
             <div className="viewer-text-preview">
@@ -414,7 +432,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 {previewType === 'image'
                   ? 'Image preview'
                   : previewType === 'pdf'
-                    ? 'PDF preview · browser viewer'
+                    ? 'PDF preview · local reader'
                     : 'Plain-text preview'}
               </strong>
               <span>{fileSize(descriptor.size)} · decrypted only in this browser</span>
@@ -428,7 +446,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 <Button asChild size="sm">
                   <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                     <ExternalLink />
-                    {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser' : 'Open in new tab'}
+                    {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser / OCR' : 'Open in new tab'}
                   </a>
                 </Button>
               </div>
@@ -463,7 +481,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             </div>
           )}
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
-            <PdfPreview url={objectUrl} name={descriptor.name} />
+            <PdfPreview data={previewBlob} name={descriptor.name} />
           )}
           {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
             <div className="modal-text-preview">
