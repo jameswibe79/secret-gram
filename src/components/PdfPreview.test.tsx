@@ -1,21 +1,22 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PdfPreview } from './PdfPreview'
 
-vi.mock('pdfjs-dist', () => ({
-  AnnotationMode: { ENABLE: 1 },
-  GlobalWorkerOptions: { workerSrc: '' },
-  getDocument: vi.fn(() => ({
-    destroy: vi.fn(),
-    promise: Promise.resolve({ numPages: 3 }),
-  })),
+const pdfMocks = vi.hoisted(() => ({
+  modernGetDocument: vi.fn(),
+  legacyGetDocument: vi.fn(),
+}))
+const runtimeMocks = vi.hoisted(() => ({
+  loadPdfJs: vi.fn(),
+  loadPdfViewer: vi.fn(),
 }))
 
-vi.mock('pdfjs-dist/web/pdf_viewer.mjs', () => {
+const viewerModule = vi.hoisted(() => {
   class EventBus {
     private readonly listeners = new Map<string, Set<(event?: unknown) => void>>()
+
 
     on(name: string, listener: (event?: unknown) => void) {
       const listeners = this.listeners.get(name) ?? new Set<(event?: unknown) => void>()
@@ -77,12 +78,48 @@ vi.mock('pdfjs-dist/web/pdf_viewer.mjs', () => {
   return { EventBus, PDFLinkService, PDFViewer }
 })
 
+vi.mock('../lib/pdf-runtime', () => runtimeMocks)
+
+function loadingTask(result: Promise<{ numPages: number }>) {
+  return {
+    destroy: vi.fn(),
+    promise: result,
+  }
+}
+
+function pdfBlob() {
+  const data = new Blob(['pdf'])
+  Object.defineProperty(data, 'arrayBuffer', {
+    value: vi.fn().mockResolvedValue(new Uint8Array([1, 2, 3]).buffer),
+  })
+  return data
+}
+
 describe('PdfPreview', () => {
+  beforeEach(() => {
+    pdfMocks.modernGetDocument.mockReset()
+    pdfMocks.legacyGetDocument.mockReset()
+    runtimeMocks.loadPdfJs.mockReset()
+    runtimeMocks.loadPdfViewer.mockReset()
+    pdfMocks.modernGetDocument.mockReturnValue(loadingTask(Promise.resolve({ numPages: 3 })))
+    pdfMocks.legacyGetDocument.mockReturnValue(loadingTask(Promise.resolve({ numPages: 3 })))
+    runtimeMocks.loadPdfJs.mockImplementation(async (build: 'modern' | 'legacy') => ({
+      AnnotationMode: { ENABLE: 1 },
+      getDocument: build === 'modern'
+        ? pdfMocks.modernGetDocument
+        : pdfMocks.legacyGetDocument,
+    }))
+    runtimeMocks.loadPdfViewer.mockImplementation(async () => viewerModule)
+  })
+
   it('renders a compact branded reader with selectable-viewer controls and no native iframe', async () => {
     const user = userEvent.setup()
-    render(<PdfPreview data={new Blob(['pdf'])} name="brief.pdf" />)
+    const data = pdfBlob()
+    render(<PdfPreview data={data} name="brief.pdf" />)
 
     expect(await screen.findByLabelText('brief.pdf PDF preview')).toBeInTheDocument()
+    await waitFor(() => expect(runtimeMocks.loadPdfJs).toHaveBeenCalledWith('modern'))
+    await waitFor(() => expect(pdfMocks.modernGetDocument).toHaveBeenCalledTimes(1))
     const pageInput = screen.getByRole('spinbutton', { name: 'Current PDF page' })
     await waitFor(() => expect(pageInput).toBeEnabled())
     expect(pageInput).toHaveValue(1)
@@ -93,5 +130,23 @@ describe('PdfPreview', () => {
     expect(pageInput).toHaveValue(2)
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeEnabled()
+  })
+
+  it('falls back to the legacy renderer when the modern PDF build fails', async () => {
+    pdfMocks.modernGetDocument.mockImplementationOnce(() => (
+      loadingTask(Promise.reject(new Error('Unsupported WebKit runtime')))
+    ))
+    const data = pdfBlob()
+    render(<PdfPreview data={data} name="ios.pdf" />)
+    const pageInput = await screen.findByRole('spinbutton', { name: 'Current PDF page' })
+    await waitFor(() => expect(runtimeMocks.loadPdfJs).toHaveBeenCalledWith('modern'))
+    await waitFor(() => expect(pdfMocks.modernGetDocument).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(pageInput).toBeEnabled())
+    await waitFor(() => expect(data.arrayBuffer).toHaveBeenCalled())
+
+    expect(pdfMocks.modernGetDocument).toHaveBeenCalledTimes(1)
+    expect(pdfMocks.legacyGetDocument).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('/ 3')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
   })
 })

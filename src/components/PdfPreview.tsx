@@ -1,39 +1,54 @@
-import { ChevronLeft, ChevronRight, Minus, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import type * as PdfJsModule from 'pdfjs-dist'
+import type * as LegacyPdfViewerModule from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
 import type {
   PDFDocumentLoadingTask,
   PDFDocumentProxy,
   RenderTask,
 } from 'pdfjs-dist'
 import type * as PdfViewerModule from 'pdfjs-dist/web/pdf_viewer.mjs'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import 'pdfjs-dist/web/pdf_viewer.css'
+import { loadPdfJs, loadPdfViewer, type PdfBuild } from '../lib/pdf-runtime'
 
 import { Button } from './ui/button'
 
-let pdfJsPromise: Promise<typeof PdfJsModule> | null = null
-let pdfViewerPromise: Promise<typeof PdfViewerModule> | null = null
+type PdfViewerInstance = PdfViewerModule.PDFViewer | LegacyPdfViewerModule.PDFViewer
+type PdfViewerEventBus = PdfViewerModule.EventBus | LegacyPdfViewerModule.EventBus
 
-function loadPdfJs() {
-  pdfJsPromise ??= import('pdfjs-dist').then((pdfJs) => {
-    pdfJs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
-    return pdfJs
+const PDF_RENDER_TIMEOUT_MS = 12_000
+const MOBILE_PDF_MAX_CANVAS_PIXELS = 8 * 1024 * 1024
+const DESKTOP_PDF_MAX_CANVAS_PIXELS = 24 * 1024 * 1024
+
+
+function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => reject(new Error('PDF preview timed out')), timeoutMs)
+    operation.then(
+      (value) => {
+        window.clearTimeout(timeout)
+        resolve(value)
+      },
+      (error: unknown) => {
+        window.clearTimeout(timeout)
+        reject(error instanceof Error ? error : new Error('PDF preview failed'))
+      },
+    )
   })
-  return pdfJsPromise
-}
-
-function loadPdfViewer() {
-  pdfViewerPromise ??= Promise.all([
-    import('pdfjs-dist/web/pdf_viewer.mjs'),
-    import('pdfjs-dist/web/pdf_viewer.css'),
-  ]).then(([pdfViewer]) => pdfViewer)
-  return pdfViewerPromise
 }
 
 function eventNumber(event: unknown, key: string): number | null {
   if (typeof event !== 'object' || event === null) return null
   const value = Reflect.get(event, key)
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function pdfMaxCanvasPixels(): number {
+  const narrowViewport = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 1024px)').matches
+    : window.innerWidth <= 1024
+  return narrowViewport && navigator.maxTouchPoints > 0
+    ? MOBILE_PDF_MAX_CANVAS_PIXELS
+    : DESKTOP_PDF_MAX_CANVAS_PIXELS
 }
 
 interface PdfThumbnailProps {
@@ -47,7 +62,12 @@ function PdfThumbnail({ data, name }: PdfThumbnailProps) {
   const renderTaskRef = useRef<RenderTask | null>(null)
   const [document, setDocument] = useState<PDFDocumentProxy | null>(null)
   const [renderSize, setRenderSize] = useState({ width: 0, height: 0 })
+  const [build, setBuild] = useState<PdfBuild>('modern')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    setBuild('modern')
+  }, [data])
 
   useEffect(() => {
     const stage = stageRef.current
@@ -71,14 +91,18 @@ function PdfThumbnail({ data, name }: PdfThumbnailProps) {
     let loadingTask: PDFDocumentLoadingTask | null = null
     setDocument(null)
     setError('')
-    void loadPdfJs().then(async (pdfJs) => {
+    const operation = (async () => {
+      const pdfJs = await loadPdfJs(build)
       const buffer = await data.arrayBuffer()
       if (stopped) return
       loadingTask = pdfJs.getDocument({ data: new Uint8Array(buffer) })
       const nextDocument = await loadingTask.promise
       if (!stopped) setDocument(nextDocument)
-    }).catch(() => {
-      if (!stopped) setError('Preview unavailable')
+    })()
+    void withTimeout(operation, PDF_RENDER_TIMEOUT_MS).catch(() => {
+      if (stopped) return
+      if (build === 'modern') setBuild('legacy')
+      else setError('PDF')
     })
 
     return () => {
@@ -87,7 +111,7 @@ function PdfThumbnail({ data, name }: PdfThumbnailProps) {
       renderTaskRef.current = null
       if (loadingTask !== null) void loadingTask.destroy()
     }
-  }, [data])
+  }, [build, data])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -112,16 +136,22 @@ function PdfThumbnail({ data, name }: PdfThumbnailProps) {
       const task = page.render({ canvas, viewport })
       renderTaskRef.current = task
       try {
-        await task.promise
+        await withTimeout(task.promise, PDF_RENDER_TIMEOUT_MS)
       } catch (renderError) {
-        if (!stopped && !(renderError instanceof Error && renderError.name === 'RenderingCancelledException')) {
-          setError('Preview unavailable')
+        if (
+          !stopped &&
+          !(renderError instanceof Error && renderError.name === 'RenderingCancelledException')
+        ) {
+          if (build === 'modern') setBuild('legacy')
+          else setError('PDF')
         }
       } finally {
         if (renderTaskRef.current === task) renderTaskRef.current = null
       }
     }).catch(() => {
-      if (!stopped) setError('Preview unavailable')
+      if (stopped) return
+      if (build === 'modern') setBuild('legacy')
+      else setError('PDF')
     })
 
     return () => {
@@ -129,14 +159,18 @@ function PdfThumbnail({ data, name }: PdfThumbnailProps) {
       renderTaskRef.current?.cancel()
       renderTaskRef.current = null
     }
-  }, [document, renderSize])
+  }, [build, document, renderSize])
 
   return (
     <div className="pdf-thumbnail-preview" aria-label={`${name} PDF thumbnail`}>
       <div ref={stageRef} className="pdf-thumbnail-stage">
         <canvas ref={canvasRef} aria-hidden="true" />
-        {document === null && !error && <span className="pdf-thumbnail-status">Rendering PDF…</span>}
-        {error && <span className="pdf-thumbnail-status is-error">{error}</span>}
+        {document === null && !error && (
+          <span className="pdf-thumbnail-status">
+            {build === 'legacy' ? 'Compatible PDF…' : 'Rendering PDF…'}
+          </span>
+        )}
+        {error && <span className="pdf-thumbnail-status is-error">PDF</span>}
       </div>
     </div>
   )
@@ -150,12 +184,19 @@ interface PdfDocumentPreviewProps {
 function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const viewerElementRef = useRef<HTMLDivElement>(null)
-  const viewerRef = useRef<PdfViewerModule.PDFViewer | null>(null)
+  const viewerRef = useRef<PdfViewerInstance | null>(null)
   const [pageNumber, setPageNumber] = useState(1)
   const [pageCount, setPageCount] = useState(0)
   const [scalePercent, setScalePercent] = useState(100)
   const [loading, setLoading] = useState(true)
+  const [build, setBuild] = useState<PdfBuild>('modern')
+  const [retryCount, setRetryCount] = useState(0)
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    setBuild('modern')
+    setRetryCount(0)
+  }, [data])
 
   useEffect(() => {
     const container = containerRef.current
@@ -164,17 +205,19 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
 
     let stopped = false
     let loadingTask: PDFDocumentLoadingTask | null = null
-    let document: PDFDocumentProxy | null = null
-    let eventBus: PdfViewerModule.EventBus | null = null
+    let eventBus: PdfViewerEventBus | null = null
     let onPagesInit: (() => void) | null = null
     let onPageChanging: ((event: unknown) => void) | null = null
     let onScaleChanging: ((event: unknown) => void) | null = null
+    let resolvePagesReady: (() => void) | null = null
     setLoading(true)
     setError('')
     setPageNumber(1)
     setPageCount(0)
+    viewerElement.replaceChildren()
 
-    void Promise.all([loadPdfJs(), loadPdfViewer()]).then(async ([pdfJs, pdfViewer]) => {
+    const operation = (async () => {
+      const [pdfJs, pdfViewer] = await Promise.all([loadPdfJs(build), loadPdfViewer(build)])
       if (stopped) return
       eventBus = new pdfViewer.EventBus()
       const linkService = new pdfViewer.PDFLinkService({ eventBus })
@@ -186,16 +229,21 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
         removePageBorders: true,
         annotationMode: pdfJs.AnnotationMode.ENABLE,
         enableSelectionRendering: true,
-        maxCanvasPixels: 24 * 1024 * 1024,
+        maxCanvasPixels: pdfMaxCanvasPixels(),
+        capCanvasAreaFactor: 100,
       })
       viewerRef.current = viewer
       linkService.setViewer(viewer)
+      const pagesReady = new Promise<void>((resolve) => {
+        resolvePagesReady = resolve
+      })
 
       onPagesInit = () => {
         if (stopped) return
         viewer.currentScaleValue = 'page-width'
         setScalePercent(Math.round(viewer.currentScale * 100))
         setLoading(false)
+        resolvePagesReady?.()
       }
       onPageChanging = (event: unknown) => {
         const nextPage = eventNumber(event, 'pageNumber')
@@ -212,20 +260,26 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
       const buffer = await data.arrayBuffer()
       if (stopped) return
       loadingTask = pdfJs.getDocument({ data: new Uint8Array(buffer) })
-      document = await loadingTask.promise
+      const document = await loadingTask.promise
       if (stopped) return
       setPageCount(document.numPages)
       viewer.setDocument(document)
       linkService.setDocument(document)
-    }).catch(() => {
-      if (!stopped) {
+      await pagesReady
+    })()
+
+    void withTimeout(operation, PDF_RENDER_TIMEOUT_MS).catch(() => {
+      if (stopped) return
+      if (build === 'modern') setBuild('legacy')
+      else {
         setLoading(false)
-        setError('This PDF could not be rendered locally. Use Open in browser / OCR or Download.')
+        setError('This PDF could not be rendered locally on this browser.')
       }
     })
 
     return () => {
       stopped = true
+      resolvePagesReady?.()
       if (eventBus !== null) {
         if (onPagesInit !== null) eventBus.off('pagesinit', onPagesInit)
         if (onPageChanging !== null) eventBus.off('pagechanging', onPageChanging)
@@ -235,7 +289,7 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
       if (loadingTask !== null) void loadingTask.destroy()
       viewerElement.replaceChildren()
     }
-  }, [data])
+  }, [build, data, retryCount])
 
   function moveToPage(nextPage: number) {
     const viewer = viewerRef.current
@@ -253,6 +307,12 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
     const viewer = viewerRef.current
     if (viewer === null) return
     viewer.currentScaleValue = 'page-width'
+  }
+
+  function retryCompatibilityPreview() {
+    setError('')
+    setBuild('legacy')
+    setRetryCount((count) => count + 1)
   }
 
   return (
@@ -305,8 +365,21 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
       </div>
       <div ref={containerRef} className="pdf-document-scroll" tabIndex={0}>
         <div ref={viewerElementRef} className="pdfViewer" />
-        {loading && <span className="pdf-document-status">Preparing PDF pages…</span>}
-        {error && <span className="pdf-document-status is-error">{error}</span>}
+        {loading && !error && (
+          <span className="pdf-document-status">
+            {build === 'legacy' ? 'Trying iOS-compatible PDF renderer…' : 'Preparing PDF pages…'}
+          </span>
+        )}
+        {error && (
+          <div className="pdf-document-status is-error" role="alert">
+            <span>{error}</span>
+            <small>Use Open in browser / OCR or Download above, or retry the compatible renderer.</small>
+            <Button type="button" size="sm" onClick={retryCompatibilityPreview}>
+              <RotateCcw />
+              Retry compatible preview
+            </Button>
+          </div>
+        )}
       </div>
     </section>
   )
