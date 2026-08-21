@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import userEvent, { type UserEvent } from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import App from './App'
@@ -84,6 +84,22 @@ beforeEach(() => {
   )
   vi.mocked(uploadEncryptedFile).mockReset()
 })
+async function chooseRoomMenuItem(
+  user: UserEvent,
+  name: string,
+) {
+  await user.click(screen.getByRole('button', { name: 'Room menu' }))
+  await user.click(await screen.findByRole('menuitem', { name }))
+}
+
+async function chooseMessageAction(
+  user: UserEvent,
+  name: string,
+) {
+  await user.click(await screen.findByRole('button', { name: /Message actions for/u }))
+  await user.click(await screen.findByRole('menuitem', { name }))
+}
+
 
 describe('SecretGram application', () => {
   it('switches themes and restores the saved preference', async () => {
@@ -205,7 +221,8 @@ describe('SecretGram application', () => {
 
     await user.click(screen.getByRole('button', { name: 'Invite' }))
     expect(screen.getByText('Share this room ID and send the password separately.')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: 'Leave room' }))
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await chooseRoomMenuItem(user, 'Leave room')
 
     await user.type(screen.getByLabelText('Room ID or invitation link'), roomId)
     await user.type(screen.getByLabelText('Room password'), 'correct horse')
@@ -227,17 +244,17 @@ describe('SecretGram application', () => {
     await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Please remove this')
     await user.click(screen.getByRole('button', { name: 'Send' }))
     expect(await screen.findByText('Please remove this')).toBeInTheDocument()
-    await user.click(await screen.findByRole('button', { name: 'Recall' }))
+    await chooseMessageAction(user, 'Recall')
 
-    expect(screen.getByRole('dialog', { name: 'Recall message?' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Recall message?' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
     expect(recallRoomMessage).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Keep message' }))
     expect(screen.queryByRole('dialog', { name: 'Recall message?' })).not.toBeInTheDocument()
     expect(screen.getByText('Please remove this')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: 'Recall' }))
-    await user.click(screen.getByRole('button', { name: 'Recall for everyone' }))
+    await chooseMessageAction(user, 'Recall')
+    await user.click(await screen.findByRole('button', { name: 'Recall for everyone' }))
     await waitFor(() => expect(recallRoomMessage).toHaveBeenCalledTimes(1))
     expect(await screen.findByText('Message recalled')).toBeInTheDocument()
     expect(screen.queryByText('Please remove this')).not.toBeInTheDocument()
@@ -253,7 +270,7 @@ describe('SecretGram application', () => {
 
     await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Keep this in view')
     await user.click(screen.getByRole('button', { name: 'Send' }))
-    await user.click(await screen.findByRole('button', { name: 'Pin' }))
+    await chooseMessageAction(user, 'Pin')
 
     await waitFor(() => expect(setRoomPin).toHaveBeenCalledWith(
       expect.any(String),
@@ -262,7 +279,7 @@ describe('SecretGram application', () => {
       true,
     ))
     const banner = await screen.findByLabelText('Pinned message')
-    expect(banner).toHaveTextContent('Pinned message')
+    expect(banner).toHaveTextContent('Pinned')
     expect(banner).toHaveTextContent('Keep this in view')
     expect(within(banner).getByRole('button', { name: 'Jump to pinned message' })).toBeInTheDocument()
     expect(document.querySelector('article.is-pinned')).toBeInTheDocument()
@@ -279,10 +296,10 @@ describe('SecretGram application', () => {
       expect(screen.queryByLabelText('Pinned message')).not.toBeInTheDocument()
     })
 
-    await user.click(screen.getByRole('button', { name: 'Pin' }))
+    await chooseMessageAction(user, 'Pin')
     await screen.findByLabelText('Pinned message')
-    await user.click(screen.getByRole('button', { name: 'Recall' }))
-    await user.click(screen.getByRole('button', { name: 'Recall for everyone' }))
+    await chooseMessageAction(user, 'Recall')
+    await user.click(await screen.findByRole('button', { name: 'Recall for everyone' }))
     await waitFor(() => {
       expect(screen.queryByLabelText('Pinned message')).not.toBeInTheDocument()
     })
@@ -300,10 +317,59 @@ describe('SecretGram application', () => {
     expect(window.location.pathname).toBe('/r/ABC123')
     expect(window.location.hash).toBe('')
 
-    await user.click(screen.getByRole('button', { name: 'Leave room' }))
+    await chooseRoomMenuItem(user, 'Leave room')
     expect(window.location.pathname).toBe('/')
     expect(screen.getByLabelText('Room ID or invitation link')).toHaveValue('')
   })
+
+  it('keeps display-name editing compact and applies the chosen name', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Create room' }))
+    await user.click(screen.getByRole('button', { name: 'Create secure room' }))
+    await screen.findByRole('heading', { name: 'Secure room' })
+
+    expect(screen.queryByRole('textbox', { name: 'Display name' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Change display name' }))
+    const displayName = screen.getByRole('textbox', { name: 'Display name' })
+    await user.clear(displayName)
+    await user.type(displayName, 'Quiet guest')
+    await user.click(screen.getByRole('button', { name: 'Done' }))
+
+    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Sent with a chosen name')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    const messageText = await screen.findByText('Sent with a chosen name')
+    const message = messageText.closest('article')
+    if (!(message instanceof HTMLElement)) throw new Error('Message article was not rendered')
+    expect(within(message).getByText('Quiet guest')).toBeInTheDocument()
+  })
+
+  it('groups consecutive messages and restores focus from the room menu', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Create room' }))
+    await user.click(screen.getByRole('button', { name: 'Create secure room' }))
+    await screen.findByRole('heading', { name: 'Secure room' })
+
+    const roomMenu = screen.getByRole('button', { name: 'Room menu' })
+    await user.click(roomMenu)
+    expect(screen.getByRole('menuitem', { name: 'Security and retention' })).toBeInTheDocument()
+    await user.keyboard('{Escape}')
+    expect(roomMenu).toHaveFocus()
+
+    const composer = screen.getByRole('textbox', { name: 'Message' })
+    await user.type(composer, 'First grouped message')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await screen.findByText('First grouped message')
+    await user.type(composer, 'Second grouped message')
+    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await screen.findByText('Second grouped message')
+
+    const messages = document.querySelectorAll('article.message')
+    expect(messages).toHaveLength(2)
+    expect(messages[1]).toHaveClass('grouped')
+  })
+
 
   it('encrypts and sends pasted files immediately', async () => {
     vi.mocked(uploadEncryptedFile).mockRejectedValue(new Error('Upload stopped for test'))
@@ -357,7 +423,7 @@ describe('SecretGram application', () => {
     expect(uploadEncryptedFile).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'Send files' }))
     await waitFor(() => expect(uploadEncryptedFile).toHaveBeenCalledTimes(1))
-    await user.click(screen.getByRole('button', { name: 'Leave room' }))
+    await chooseRoomMenuItem(user, 'Leave room')
     await Promise.resolve()
     await Promise.resolve()
 

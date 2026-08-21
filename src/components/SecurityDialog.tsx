@@ -1,4 +1,11 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from './ui/dialog'
 
 interface SecurityDialogProps {
   title: string
@@ -7,16 +14,6 @@ interface SecurityDialogProps {
   className?: string
   backdropClassName?: string
 }
-
-const FOCUSABLE_SELECTOR = [
-  'a[href]',
-  'button:not([disabled])',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(',')
-
 
 export function SecurityIcon() {
   return (
@@ -35,6 +32,7 @@ export function SecurityIcon() {
     </svg>
   )
 }
+
 export function SecurityDialog({
   title,
   onClose,
@@ -42,71 +40,28 @@ export function SecurityDialog({
   className = '',
   backdropClassName = '',
 }: SecurityDialogProps) {
-  const dialogRef = useRef<HTMLElement>(null)
-  const onCloseRef = useRef(onClose)
-  onCloseRef.current = onClose
-
-  useEffect(() => {
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null
-    const dialog = dialogRef.current
-    dialog?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus()
-
-    function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onCloseRef.current()
-        return
-      }
-      if (event.key !== 'Tab' || !dialog) return
-
-      const items = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)]
-      if (items.length === 0) {
-        event.preventDefault()
-        dialog.focus()
-        return
-      }
-
-      const first = items[0]
-      const last = items.at(-1)
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last?.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-
-    document.addEventListener('keydown', handleKeyDown)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      previouslyFocused?.focus()
-    }
-  }, [])
-
+  const previouslyFocusedRef = useRef(
+    document.activeElement instanceof HTMLElement ? document.activeElement : null,
+  )
   return (
-    <div
-      className={backdropClassName ? `modal-backdrop ${backdropClassName}` : 'modal-backdrop'}
-      role="presentation"
-      onMouseDown={onClose}
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (open) return
+        const previouslyFocused = previouslyFocusedRef.current
+        onClose()
+        queueMicrotask(() => previouslyFocused?.focus())
+      }}
     >
-      <section
-        ref={dialogRef}
+      <DialogContent
         className={className ? `modal ${className}` : 'modal'}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="security-dialog-title"
-        tabIndex={-1}
-        onMouseDown={(event) => event.stopPropagation()}
+        overlayClassName={backdropClassName}
       >
-        <div className="modal-header">
-          <h2 id="security-dialog-title">{title}</h2>
-          <button type="button" className="text-button" onClick={onClose}>Close</button>
-        </div>
+        <DialogHeader className="modal-header">
+          <DialogTitle>{title}</DialogTitle>
+        </DialogHeader>
         {children}
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

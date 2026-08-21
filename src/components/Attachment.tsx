@@ -1,3 +1,4 @@
+import { Download, ExternalLink, RotateCcw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { FileDescriptor } from '../shared/protocol'
@@ -7,6 +8,7 @@ import {
 } from '../lib/file-transfer'
 import { SecurityDialog } from './SecurityDialog'
 import { PdfPreview } from './PdfPreview'
+import { Button } from './ui/button'
 
 interface AttachmentProps {
   descriptor: FileDescriptor
@@ -281,9 +283,10 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
             </div>
           </div>
           <div className="attachment-actions">
-            <button type="button" className="small-button" disabled={loading} onClick={download}>
+            <Button variant="secondary" size="sm" type="button" disabled={loading} onClick={download}>
+              <Download />
               Download
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -317,10 +320,16 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
             </div>
             {objectUrl && previewBlob && (
               <div className="preview-toolbar-actions">
-                <button type="button" className="small-button" onClick={download}>Download</button>
-                <a className="small-button primary-soft" href={objectUrl} target="_blank" rel="noopener noreferrer">
-                  {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser' : 'Open in new tab'}
-                </a>
+                <Button variant="outline" size="sm" type="button" onClick={download}>
+                  <Download />
+                  Download
+                </Button>
+                <Button asChild size="sm">
+                  <a href={objectUrl} target="_blank" rel="noopener noreferrer">
+                    <ExternalLink />
+                    {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser' : 'Open in new tab'}
+                  </a>
+                </Button>
               </div>
             )}
           </div>
@@ -333,7 +342,7 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
                 <progress max={1} value={progress} aria-label={`${descriptor.name} preview progress`} />
                 <span>{Math.round(progress * 100)}%</span>
               </div>
-              <button type="button" className="small-button" onClick={cancelLoad}>Cancel preview</button>
+              <Button type="button" variant="outline" size="sm" onClick={cancelLoad}>Cancel preview</Button>
             </div>
           )}
           {!loading && error && (!objectUrl || !previewBlob) && (
@@ -341,7 +350,10 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
               <span aria-hidden="true">!</span>
               <h3>Preview could not be prepared</h3>
               <p>{error}</p>
-              <button type="button" className="small-button primary-soft" onClick={openPreview}>Try again</button>
+              <Button type="button" size="sm" onClick={openPreview}>
+                <RotateCcw />
+                Try again
+              </Button>
             </div>
           )}
           {!loading && previewType === 'image' && objectUrl && previewBlob && (

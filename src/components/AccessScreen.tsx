@@ -1,4 +1,5 @@
-import { useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Clock3, FileKey2, LockKeyhole, MessageSquareText, Moon, ShieldCheck, Sun } from 'lucide-react'
+import { useState, type FormEvent } from 'react'
 
 import { ApiError, createRoom, getRoomInfo } from '../lib/api'
 import { createMessageSender } from '../lib/message-crypto'
@@ -12,7 +13,13 @@ import {
   type RoomInvitation,
 } from '../lib/room-crypto'
 import type { ActiveRoomSession } from '../lib/session'
-import { SecurityDialog, SecurityIcon } from './SecurityDialog'
+import { SecurityDialog } from './SecurityDialog'
+import { Badge } from './ui/badge'
+import { Button } from './ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
+import { Input } from './ui/input'
+import { NativeSelect } from './ui/native-select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs'
 
 interface AccessScreenProps {
   initialInvitation?: RoomInvitation | null
@@ -54,15 +61,6 @@ export function AccessScreen({
     setError('')
   }
 
-  function handleTabKey(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-    event.preventDefault()
-    const nextMode = mode === 'join' ? 'create' : 'join'
-    selectMode(nextMode)
-    window.requestAnimationFrame(() => {
-      document.getElementById(`${nextMode}-room-tab`)?.focus()
-    })
-  }
 
   async function joinRoom(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -152,226 +150,243 @@ export function AccessScreen({
     <main className="access-shell">
       <header className="product-bar">
         <div className="brand-lockup" aria-label="SecretGram">
-          <span className="brand-mark" aria-hidden="true"><span>S</span></span>
-          <span className="brand-name">SecretGram</span>
-          <span className="brand-tagline">a quiet place to share</span>
+          <span className="brand-mark" aria-hidden="true"><LockKeyhole /></span>
+          <span>
+            <span className="brand-name">SecretGram</span>
+            <span className="brand-tagline">Private rooms. Zero accounts.</span>
+          </span>
         </div>
         <div className="product-actions">
-          <button
-            className="text-button"
+          <Button
+            variant="ghost"
+            size="sm"
             type="button"
             aria-label={`Switch to ${theme === 'night' ? 'day' : 'night'} theme`}
             onClick={onToggleTheme}
           >
-            <span aria-hidden="true">{theme === 'night' ? '☀' : '☾'}</span>
-            {theme === 'night' ? 'Day' : 'Night'}
-          </button>
-          <button
-            className="text-button"
+            {theme === 'night' ? <Sun /> : <Moon />}
+            <span className="desktop-action-label">{theme === 'night' ? 'Light' : 'Dark'}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             type="button"
             aria-label="Security details"
             onClick={() => setShowSecurity(true)}
           >
-            <SecurityIcon />
-            Security
-          </button>
+            <ShieldCheck />
+            <span className="desktop-action-label">Security</span>
+          </Button>
         </div>
       </header>
 
       <section className="access-panel" aria-labelledby="access-title">
         <div className="access-intro">
-          <div className="access-intro-copy">
-            <p className="eyebrow">Private by design · peaceful by nature</p>
-            <h1 id="access-title">{mode === 'join' ? 'Join an encrypted room' : 'Create an encrypted room'}</h1>
-            <p>No account, no noise. Open a temporary room for messages and files that only participants can read.</p>
-            <div className="intro-trust" aria-label="Room privacy highlights">
-              <span>Encrypted here</span>
-              <span>Temporary rooms</span>
-              <span>No tracking</span>
+          <Badge variant="outline" className="eyebrow">
+            <ShieldCheck />
+            End-to-end encrypted
+          </Badge>
+          <h1 id="access-title">
+            Share what matters.
+            <span>Keep it between you.</span>
+          </h1>
+          <p>
+            Temporary rooms for private messages and files. Encryption happens in your browser,
+            before anything reaches the server.
+          </p>
+          <div className="intro-trust" aria-label="Room privacy highlights">
+            <span><MessageSquareText /> Encrypted messages</span>
+            <span><FileKey2 /> Private attachments</span>
+            <span><Clock3 /> Automatic expiry</span>
+          </div>
+          <div className="security-visual" aria-hidden="true">
+            <div className="security-visual-glow" />
+            <div className="security-visual-card">
+              <span className="security-visual-icon"><LockKeyhole /></span>
+              <strong>Content encrypted on this device</strong>
+              <span>Only room participants hold the key</span>
+              <div className="cipher-lines"><i /><i /><i /></div>
             </div>
           </div>
-          <div className="storybook-scene" aria-hidden="true">
-            <span className="scene-sun" />
-            <span className="scene-cloud cloud-one" />
-            <span className="scene-cloud cloud-two" />
-            <span className="scene-hill hill-back" />
-            <span className="scene-hill hill-front" />
-            <span className="scene-house"><i /></span>
-            <span className="scene-path" />
-            <span className="scene-leaf leaf-one" />
-            <span className="scene-leaf leaf-two" />
-          </div>
         </div>
 
-        <div className="access-controls">
-        <div className="tabs" role="tablist" aria-label="Room actions">
-          <button
-            id="join-room-tab"
-            type="button"
-            role="tab"
-            aria-selected={mode === 'join'}
-            aria-controls="join-room-panel"
-            className={mode === 'join' ? 'tab active' : 'tab'}
-            onClick={() => selectMode('join')}
-            onKeyDown={handleTabKey}
-          >
-            Join room
-          </button>
-          <button
-            id="create-room-tab"
-            type="button"
-            role="tab"
-            aria-selected={mode === 'create'}
-            aria-controls="create-room-panel"
-            className={mode === 'create' ? 'tab active' : 'tab'}
-            onClick={() => selectMode('create')}
-            onKeyDown={handleTabKey}
-          >
-            Create room
-          </button>
-        </div>
-
-        {mode === 'join' ? (
-          <form
-            id="join-room-panel"
-            className="access-form"
-            role="tabpanel"
-            aria-labelledby="join-room-tab"
-            onSubmit={joinRoom}
-            noValidate
-            aria-busy={busy}
-          >
-            <label htmlFor="room-id">Room ID or invitation link</label>
-            <input
-              id="room-id"
-              value={roomId}
-              onChange={(event) => {
-                setRoomId(event.target.value)
-                setInvitationKey(undefined)
-                setError('')
+        <Card className="access-controls">
+          <CardHeader>
+            <CardTitle>{mode === 'join' ? 'Join an encrypted room' : 'Create an encrypted room'}</CardTitle>
+            <CardDescription>
+              {mode === 'join'
+                ? 'Use a secure invitation link, or enter a room ID and password.'
+                : 'Choose how long the room stays available.'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs
+              value={mode}
+              onValueChange={(value) => {
+                if (value === 'join' || value === 'create') selectMode(value)
               }}
-              autoComplete="off"
-              autoCapitalize="characters"
-              inputMode="text"
-              spellCheck={false}
-              placeholder="e.g. /r/AB12CD"
-              aria-describedby={roomIdDescription}
-              aria-invalid={error ? true : undefined}
-              autoFocus
-            />
-            <p className="field-help" id="room-id-help">
-              {invitationKey === undefined
-                ? 'Enter the optional room password, or paste the full secure invitation link.'
-                : 'Secure invitation key loaded from the link; no password is needed.'}
-            </p>
-            <label htmlFor="join-room-password">Room password</label>
-            <input
-              id="join-room-password"
-              type="password"
-              value={joinPassword}
-              disabled={invitationKey !== undefined || busy}
-              onChange={(event) => {
-                setJoinPassword(event.target.value)
-                setError('')
-              }}
-              autoComplete="current-password"
-              placeholder={invitationKey === undefined ? 'Required without a secure link' : 'Not needed'}
-            />
-            <button className="primary-button" type="submit" disabled={busy || roomId.trim() === ''}>
-              {busy ? 'Establishing encrypted session…' : 'Join room'}
-            </button>
-          </form>
-        ) : (
-          <form
-            id="create-room-panel"
-            className="access-form"
-            role="tabpanel"
-            aria-labelledby="create-room-tab"
-            onSubmit={(event) => {
-              event.preventDefault()
-              void createSecureRoom()
-            }}
-            aria-busy={busy}
-          >
-            <label htmlFor="room-retention">Room lifetime</label>
-            <select
-              id="room-retention"
-              value={ttlSeconds}
-              disabled={busy}
-              onChange={(event) => setTtlSeconds(Number(event.target.value))}
             >
-              <option value={24 * 60 * 60}>24 hours</option>
-              <option value={7 * 24 * 60 * 60}>7 days</option>
-              <option value={30 * 24 * 60 * 60}>30 days</option>
-            </select>
-            <p className="field-help">
-              This room expires after {roomLifetime}. Messages are retained for up to seven days, or until the room
-              expires if sooner.
-            </p>
-            <aside
-              className="join-method-callout"
-              role="note"
-              aria-label="How participants join"
-            >
-              <strong>How participants join</strong>
-              <dl>
-                <div>
-                  <dt>No password</dt>
-                  <dd>Share the full invitation link. The six-character Room ID alone will not work.</dd>
-                </div>
-                <div>
-                  <dt>With a password</dt>
-                  <dd>Share the Room ID and password separately.</dd>
-                </div>
-              </dl>
-            </aside>
-            <label htmlFor="create-room-password">Optional room password</label>
-            <input
-              id="create-room-password"
-              type="password"
-              value={createPassword}
-              disabled={busy}
-              minLength={ROOM_PASSWORD_MIN_LENGTH}
-              onChange={(event) => {
-                setCreatePassword(event.target.value)
-                setError('')
-              }}
-              autoComplete="new-password"
-              placeholder={`At least ${ROOM_PASSWORD_MIN_LENGTH} characters`}
-            />
-            <label htmlFor="confirm-room-password">Confirm password</label>
-            <input
-              id="confirm-room-password"
-              type="password"
-              value={confirmPassword}
-              disabled={busy || createPassword === ''}
-              onChange={(event) => {
-                setConfirmPassword(event.target.value)
-                setError('')
-              }}
-              autoComplete="new-password"
-              placeholder={createPassword === '' ? 'Not needed without a password' : 'Re-enter room password'}
-            />
-            <button className="primary-button" type="submit" disabled={busy}>
-              {busy ? 'Creating…' : 'Create secure room'}
-            </button>
-          </form>
-        )}
+              <TabsList className="tabs" aria-label="Room actions">
+                <TabsTrigger id="join-room-tab" value="join">Join room</TabsTrigger>
+                <TabsTrigger id="create-room-tab" value="create">Create room</TabsTrigger>
+              </TabsList>
 
-        {error && <p className="form-error" id="access-error" role="alert">{error}</p>}
+              <TabsContent value="join">
+                {mode === 'join' && (
+                  <form
+                    id="join-room-panel"
+                    className="access-form"
+                    onSubmit={joinRoom}
+                    noValidate
+                    aria-busy={busy}
+                  >
+                    <div className="field-group">
+                      <label htmlFor="room-id">Room ID or invitation link</label>
+                      <Input
+                        id="room-id"
+                        value={roomId}
+                        onChange={(event) => {
+                          setRoomId(event.target.value)
+                          setInvitationKey(undefined)
+                          setError('')
+                        }}
+                        autoComplete="off"
+                        autoCapitalize="characters"
+                        inputMode="text"
+                        spellCheck={false}
+                        placeholder="Paste a link or enter /r/AB12CD"
+                        aria-describedby={roomIdDescription}
+                        aria-invalid={error ? true : undefined}
+                        autoFocus
+                      />
+                      <p className="field-help" id="room-id-help">
+                        {invitationKey === undefined
+                          ? 'Without a secure link, enter the room password below.'
+                          : 'Secure invitation key loaded. No password is needed.'}
+                      </p>
+                    </div>
+                    <div className="field-group">
+                      <label htmlFor="join-room-password">Room password</label>
+                      <Input
+                        id="join-room-password"
+                        type="password"
+                        value={joinPassword}
+                        disabled={invitationKey !== undefined || busy}
+                        onChange={(event) => {
+                          setJoinPassword(event.target.value)
+                          setError('')
+                        }}
+                        autoComplete="current-password"
+                        placeholder={invitationKey === undefined ? 'Required without a secure link' : 'Not needed'}
+                      />
+                    </div>
+                    <Button className="primary-button" size="lg" type="submit" disabled={busy || roomId.trim() === ''}>
+                      <LockKeyhole />
+                      {busy ? 'Establishing encrypted session…' : 'Join room'}
+                    </Button>
+                  </form>
+                )}
+              </TabsContent>
 
-        <div className="trust-strip">
-          <span className="status-dot secure" aria-hidden="true" />
-          <span>Content encrypted on this device</span>
-          <span aria-hidden="true">·</span>
-          <span>Server handles ciphertext only</span>
-        </div>
-        </div>
+              <TabsContent value="create">
+                {mode === 'create' && (
+                  <form
+                    id="create-room-panel"
+                    className="access-form"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void createSecureRoom()
+                    }}
+                    aria-busy={busy}
+                  >
+                    <div className="field-group">
+                      <label htmlFor="room-retention">Room lifetime</label>
+                      <NativeSelect
+                        id="room-retention"
+                        value={ttlSeconds}
+                        disabled={busy}
+                        onChange={(event) => setTtlSeconds(Number(event.target.value))}
+                      >
+                        <option value={24 * 60 * 60}>24 hours</option>
+                        <option value={7 * 24 * 60 * 60}>7 days</option>
+                        <option value={30 * 24 * 60 * 60}>30 days</option>
+                      </NativeSelect>
+                      <p className="field-help">
+                        This room expires after {roomLifetime}. Messages are retained for up to seven
+                        days, or until the room expires if sooner.
+                      </p>
+                    </div>
+                    <aside className="join-method-callout" role="note" aria-label="How participants join">
+                      <ShieldCheck aria-hidden="true" />
+                      <div>
+                        <strong>How participants join</strong>
+                        <dl>
+                          <div>
+                            <dt>No password</dt>
+                            <dd>Share the full invitation link. The six-character Room ID alone will not work.</dd>
+                          </div>
+                          <div>
+                            <dt>With a password</dt>
+                            <dd>Share the Room ID and password separately.</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    </aside>
+                    <div className="field-group">
+                      <label htmlFor="create-room-password">Optional room password</label>
+                      <Input
+                        id="create-room-password"
+                        type="password"
+                        value={createPassword}
+                        disabled={busy}
+                        minLength={ROOM_PASSWORD_MIN_LENGTH}
+                        onChange={(event) => {
+                          setCreatePassword(event.target.value)
+                          setError('')
+                        }}
+                        autoComplete="new-password"
+                        placeholder={`At least ${ROOM_PASSWORD_MIN_LENGTH} characters`}
+                      />
+                    </div>
+                    <div className="field-group">
+                      <label htmlFor="confirm-room-password">Confirm password</label>
+                      <Input
+                        id="confirm-room-password"
+                        type="password"
+                        value={confirmPassword}
+                        disabled={busy || createPassword === ''}
+                        onChange={(event) => {
+                          setConfirmPassword(event.target.value)
+                          setError('')
+                        }}
+                        autoComplete="new-password"
+                        placeholder={createPassword === '' ? 'Not needed without a password' : 'Re-enter room password'}
+                      />
+                    </div>
+                    <Button className="primary-button" size="lg" type="submit" disabled={busy}>
+                      <LockKeyhole />
+                      {busy ? 'Creating…' : 'Create secure room'}
+                    </Button>
+                  </form>
+                )}
+              </TabsContent>
+            </Tabs>
+
+            {error && <p className="form-error" id="access-error" role="alert">{error}</p>}
+
+            <div className="trust-strip">
+              <span className="status-dot secure" aria-hidden="true" />
+              <span>Browser-encrypted</span>
+              <span aria-hidden="true">·</span>
+              <span>Server sees ciphertext only</span>
+            </div>
+          </CardContent>
+        </Card>
       </section>
 
       <footer className="access-footer">
-        <span>No analytics scripts or external fonts</span>
-        <span>Room protocol 3</span>
+        <span>No analytics or external fonts</span>
+        <span>Protocol 3</span>
       </footer>
 
       {showSecurity && (

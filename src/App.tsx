@@ -49,7 +49,7 @@ function App() {
     document.documentElement.dataset.theme = theme
     document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')?.setAttribute(
       'content',
-      theme === 'day' ? '#eef1dc' : '#14231f',
+      theme === 'day' ? '#fafafa' : '#17191e',
     )
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme)
