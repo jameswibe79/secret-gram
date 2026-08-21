@@ -1,11 +1,15 @@
 import {
-  ArrowDown,
+  Check,
   CheckCheck,
   ChevronDown,
   CircleAlert,
+  Clipboard,
   Copy,
   DoorOpen,
   Ellipsis,
+  File,
+  FileText,
+  Files,
   LoaderCircle,
   LockKeyhole,
   Moon,
@@ -23,6 +27,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ChangeEvent,
   type ClipboardEvent,
   type DragEvent,
@@ -71,8 +76,11 @@ interface TransferItem {
   error?: string
 }
 
+type ResourceFilter = 'all' | 'file' | 'text'
+
 const LOCAL_PREVIEW_LIMIT_BYTES = 16 * 1024 * 1024
 const DROPDOWN_DIALOG_FOCUS_DELAY_MS = 25
+const TEXT_LIST_PREVIEW_CHARACTERS = 180
 const LOCAL_IMAGE_PREVIEW_TYPES: Record<string, true> = {
   'image/avif': true,
   'image/gif': true,
@@ -88,7 +96,6 @@ function statusLabel(status: ReturnType<typeof useRoomChannel>['status']): strin
   return 'Connecting'
 }
 
-
 function formatTime(timestamp: number): string {
   try {
     return new Intl.DateTimeFormat('en-US', {
@@ -103,7 +110,14 @@ function formatTime(timestamp: number): string {
 function formatFileSize(bytes: number): string {
   if (bytes < 1_024) return `${bytes} B`
   if (bytes < 1_024 ** 2) return `${(bytes / 1_024).toFixed(1)} KB`
-  return `${(bytes / 1_024 ** 2).toFixed(1)} MB`
+  if (bytes < 1_024 ** 3) return `${(bytes / 1_024 ** 2).toFixed(1)} MB`
+  return `${(bytes / 1_024 ** 3).toFixed(1)} GB`
+}
+
+function senderHue(senderId: string): number {
+  let hash = 0
+  for (const character of senderId) hash = (hash * 31 + character.charCodeAt(0)) >>> 0
+  return hash % 360
 }
 
 function invitationLink(session: ActiveRoomSession): string {
@@ -152,17 +166,19 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
   const [showSecurity, setShowSecurity] = useState(false)
   const [recallCandidateId, setRecallCandidateId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState(false)
-  const [showJumpToLatest, setShowJumpToLatest] = useState(false)
   const [transfers, setTransfers] = useState<TransferItem[]>([])
   const [isDraggingFiles, setIsDraggingFiles] = useState(false)
+  const [resourceFilter, setResourceFilter] = useState<ResourceFilter>('all')
+  const [selectedResourceId, setSelectedResourceId] = useState<string | null>(null)
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false)
+  const [newItemCount, setNewItemCount] = useState(0)
   const controllersRef = useRef(new Map<string, AbortController>())
   const transfersRef = useRef<TransferItem[]>([])
   const activeRef = useRef(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const timelineRef = useRef<HTMLDivElement>(null)
-  const timelineAtBottomRef = useRef(true)
+  const resourceListRef = useRef<HTMLDivElement>(null)
+  const resourceListAtTopRef = useRef(true)
   const previousMessageCountRef = useRef(0)
-  const timelineEndRef = useRef<HTMLDivElement>(null)
   const composerTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   const credentials = useMemo(
@@ -174,25 +190,55 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     [session.authToken, session.deviceId, session.locator],
   )
 
-  const pinnedMessage = useMemo(
-    () => messages.find((message) =>
-      message.id === pinnedMessageId &&
-      message.recalledAt === undefined) ?? null,
-    [messages, pinnedMessageId],
+  const orderedResources = useMemo(() => [...messages].sort((left, right) => {
+    const leftPinned = left.id === pinnedMessageId
+    const rightPinned = right.id === pinnedMessageId
+    if (leftPinned !== rightPinned) return leftPinned ? -1 : 1
+    const leftTime = left.recalledAt ?? left.content?.clientCreatedAt ?? left.serverCreatedAt ?? 0
+    const rightTime = right.recalledAt ?? right.content?.clientCreatedAt ?? right.serverCreatedAt ?? 0
+    return rightTime - leftTime
+  }), [messages, pinnedMessageId])
+
+  const visibleResources = useMemo(() => orderedResources.filter((message) => {
+    if (resourceFilter === 'all') return true
+    if (message.recalledAt !== undefined) return false
+    return message.content?.kind === resourceFilter
+  }), [orderedResources, resourceFilter])
+
+  const selectedResource = useMemo(
+    () => visibleResources.find((message) => message.id === selectedResourceId) ?? null,
+    [selectedResourceId, visibleResources],
   )
 
+  const resourceCounts = useMemo(() => ({
+    all: orderedResources.length,
+    file: orderedResources.filter((message) =>
+      message.recalledAt === undefined && message.content?.kind === 'file').length,
+    text: orderedResources.filter((message) =>
+      message.recalledAt === undefined && message.content?.kind === 'text').length,
+  }), [orderedResources])
+
   useEffect(() => {
-    const hasNewMessage = messages.length > previousMessageCountRef.current
+    const addedCount = Math.max(0, messages.length - previousMessageCountRef.current)
     previousMessageCountRef.current = messages.length
-    if (!hasNewMessage) return
-    if (timelineAtBottomRef.current) {
-      window.requestAnimationFrame(() => {
-        timelineEndRef.current?.scrollIntoView?.({ block: 'end' })
-      })
+    if (addedCount === 0) return
+    if (resourceListAtTopRef.current) {
+      window.requestAnimationFrame(() => resourceListRef.current?.scrollTo?.({ top: 0 }))
       return
     }
-    setShowJumpToLatest(true)
+    setNewItemCount((current) => current + addedCount)
   }, [messages.length])
+
+  useEffect(() => {
+    if (visibleResources.length === 0) {
+      setSelectedResourceId(null)
+      setMobileDetailOpen(false)
+      return
+    }
+    if (!visibleResources.some((message) => message.id === selectedResourceId)) {
+      setSelectedResourceId(visibleResources[0].id)
+    }
+  }, [selectedResourceId, visibleResources])
 
   useEffect(() => {
     transfersRef.current = transfers
@@ -219,26 +265,30 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     const textarea = composerTextareaRef.current
     if (textarea === null) return
     textarea.style.height = 'auto'
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 150)}px`
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 132)}px`
   }, [draft])
 
-  function scrollToLatest(behavior: ScrollBehavior = 'smooth') {
-    timelineAtBottomRef.current = true
-    setShowJumpToLatest(false)
-    timelineEndRef.current?.scrollIntoView?.({ block: 'end', behavior })
+  function selectResource(messageId: string) {
+    setSelectedResourceId(messageId)
+    setMobileDetailOpen(true)
   }
 
-  function handleTimelineScroll(event: UIEvent<HTMLDivElement>) {
-    const timeline = event.currentTarget
-    const atBottom = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 80
-    timelineAtBottomRef.current = atBottom
-    if (atBottom) setShowJumpToLatest(false)
+  function showNewestResources() {
+    resourceListAtTopRef.current = true
+    setNewItemCount(0)
+    resourceListRef.current?.scrollTo?.({ top: 0, behavior: 'smooth' })
+  }
+
+  function handleResourceListScroll(event: UIEvent<HTMLDivElement>) {
+    const atTop = event.currentTarget.scrollTop < 48
+    resourceListAtTopRef.current = atTop
+    if (atTop) setNewItemCount(0)
   }
 
   async function copy(value: string, label: string) {
     try {
       await copyText(value)
-      toast.success(label)
+      toast.success(label, { icon: <Check aria-hidden="true" /> })
     } catch {
       toast.error('Copy failed')
     }
@@ -253,8 +303,8 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     )
     if (!text && pending.length === 0) return
     setComposerError('')
-    timelineAtBottomRef.current = true
-    setShowJumpToLatest(false)
+    resourceListAtTopRef.current = true
+    setNewItemCount(0)
 
     if (text) {
       setDraft('')
@@ -269,9 +319,10 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
       }
       try {
         await sendPlainMessage(message)
+        setSelectedResourceId(message.id)
       } catch {
         setDraft(text)
-        setComposerError('The message could not be encrypted or sent. Try again.')
+        setComposerError('The text could not be encrypted or shared. Try again.')
       }
     }
 
@@ -287,7 +338,11 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
   }
 
   function handleComposerKey(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (
+      event.key === 'Enter' &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault()
       event.currentTarget.form?.requestSubmit()
     }
@@ -304,14 +359,13 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
       file: descriptor,
     }
     await sendPlainMessage(message)
+    setSelectedResourceId(message.id)
   }
 
   async function uploadFiles(
     batch: Array<{ file: File; transferId: string; controller: AbortController }>,
   ) {
-    for (const transfer of batch) {
-      controllersRef.current.set(transfer.transferId, transfer.controller)
-    }
+    for (const transfer of batch) controllersRef.current.set(transfer.transferId, transfer.controller)
     const ids = new Set(batch.map(({ transferId }) => transferId))
     setTransfers((current) => current.map((item) => ids.has(item.id)
       ? { ...item, progress: 0, status: 'uploading' as const, error: undefined }
@@ -346,15 +400,13 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
       } catch (error) {
         const aborted = controller.signal.aborted
         if (activeRef.current) {
-          setTransfers((current) =>
-            current.map((item) => item.id === transferId
-              ? {
-                  ...item,
-                  status: 'failed',
-                  error: aborted ? 'Upload canceled' : error instanceof Error ? error.message : 'Upload failed',
-                }
-              : item),
-          )
+          setTransfers((current) => current.map((item) => item.id === transferId
+            ? {
+                ...item,
+                status: 'failed',
+                error: aborted ? 'Upload canceled' : error instanceof Error ? error.message : 'Upload failed',
+              }
+            : item))
         }
       } finally {
         controllersRef.current.delete(transferId)
@@ -374,9 +426,7 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
         ? { previewUrl: URL.createObjectURL(file) }
         : {}),
     }))
-    if (nextTransfers.length > 0) {
-      setTransfers((current) => [...current, ...nextTransfers])
-    }
+    if (nextTransfers.length > 0) setTransfers((current) => [...current, ...nextTransfers])
     return nextTransfers
   }
 
@@ -432,10 +482,8 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
   function leaveRoom() {
     if (
       transfers.some((transfer) => transfer.status === 'pending' || transfer.status === 'uploading') &&
-      !window.confirm('Attachments are pending or uploading. Leaving the room will discard them. Continue?')
-    ) {
-      return
-    }
+      !window.confirm('Files are pending or uploading. Leaving the room will discard them. Continue?')
+    ) return
     for (const controller of controllersRef.current.values()) controller.abort()
     for (const transfer of transfersRef.current) {
       if (transfer.previewUrl) URL.revokeObjectURL(transfer.previewUrl)
@@ -446,7 +494,6 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
 
   const activeUploadCount = transfers.filter((transfer) => transfer.status === 'uploading').length
   const hasActiveUploads = activeUploadCount > 0
-
   const hasPendingFiles = transfers.some((transfer) => transfer.status === 'pending')
 
   return (
@@ -457,20 +504,20 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
             <div className="brand-mark compact" aria-hidden="true"><LockKeyhole /></div>
             <div className="room-heading">
               <div className="room-title-line">
-                <h1>Secure room</h1>
-                <span className="room-privacy-label"><ShieldCheck /> End-to-end encrypted</span>
+                <h1>Encrypted sharing room</h1>
+                <span className="room-privacy-label"><ShieldCheck /> Browser encrypted</span>
               </div>
               <div className="room-status" aria-live="polite">
                 <span className={`status-dot ${status}`} aria-hidden="true" />
                 <span>{statusLabel(status)}</span>
                 {status === 'connected' && (
-                  <span>· {onlineCount} online session{onlineCount === 1 ? '' : 's'}</span>
+                  <span>· {onlineCount} online device{onlineCount === 1 ? '' : 's'}</span>
                 )}
               </div>
             </div>
           </div>
           <div className="room-actions">
-            <Button variant="default" size="sm" type="button" onClick={() => setShowInvite(true)}>
+            <Button variant="default" size="sm" type="button" aria-label="Invite" onClick={() => setShowInvite(true)}>
               <UserRoundPlus />
               <span>Invite</span>
             </Button>
@@ -517,126 +564,351 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
         )}
 
         <section className={isDraggingFiles ? 'workspace is-dragging' : 'workspace'}>
-          <div
-            ref={timelineRef}
-            className="timeline"
-            aria-label="Encrypted messages"
-            onScroll={handleTimelineScroll}
+          <form
+            className="share-panel"
+            aria-label="Share files and text"
+            onSubmit={submitText}
+            onDragEnter={(event) => {
+              if (event.dataTransfer.types.includes('Files')) setIsDraggingFiles(true)
+            }}
+            onDragOver={(event) => {
+              if (!event.dataTransfer.types.includes('Files')) return
+              event.preventDefault()
+              event.dataTransfer.dropEffect = 'copy'
+            }}
+            onDragLeave={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFiles(false)
+            }}
+            onDrop={queueDroppedFiles}
           >
-            <div className="timeline-content">
-              {pinnedMessage !== null && (
-                <aside className="pinned-message" aria-label="Pinned message">
-                  <span className="pinned-icon" aria-hidden="true"><Pin /></span>
-                  <button
-                    type="button"
-                    className="pinned-summary"
-                    aria-label="Jump to pinned message"
-                    onClick={() => {
-                      document.getElementById(`message-${pinnedMessage.id}`)?.scrollIntoView({
-                        block: 'center',
-                        behavior: 'smooth',
-                      })
-                    }}
+            <div className="drop-hint" aria-hidden={!isDraggingFiles}>
+              <Files />
+              <strong>Drop files to add them</strong>
+              <span>They stay in this browser until you share them.</span>
+            </div>
+            <div className="share-panel-topline">
+              <div>
+                <h2>Share files or clipboard text</h2>
+                <p>Encrypted here before anything leaves this device.</p>
+              </div>
+              <div className="share-identity">
+                <Button
+                  className="identity-chip"
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  aria-label="Change display name"
+                  aria-expanded={editingName}
+                  onClick={() => setEditingName((value) => !value)}
+                >
+                  <span
+                    className="identity-avatar"
+                    style={{ '--sender-hue': senderHue(session.deviceId) } as CSSProperties}
+                    aria-hidden="true"
                   >
-                    <span className="pinned-context">
-                      <span className="pinned-eyebrow">Pinned</span>
-                      <span aria-hidden="true">·</span>
-                      <strong>{pinnedMessage.content?.senderName ?? 'Unverified sender'}</strong>
-                    </span>
-                    <span className="pinned-preview">
-                      {pinnedMessage.content?.kind === 'text'
-                        ? pinnedMessage.content.text
-                        : pinnedMessage.content?.kind === 'file'
-                          ? `Attachment: ${pinnedMessage.content.file.name}`
-                          : 'Message could not be verified'}
-                    </span>
-                  </button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="pinned-remove"
-                    aria-label="Unpin message"
-                    disabled={pinningMessageId !== null}
-                    onClick={() => void updatePin(pinnedMessage.id, false)}
-                  >
-                    {pinningMessageId === pinnedMessage.id ? 'Working…' : 'Unpin'}
-                  </Button>
-                </aside>
-              )}
-              {pinError && <p className="pin-error" role="alert">{pinError}</p>}
-              {messages.length === 0 && (
-                <div className="empty-state">
-                  <span className="empty-illustration" aria-hidden="true"><i /></span>
-                  <span className="empty-mark">End-to-end encrypted</span>
-                  <h2>Your room is ready</h2>
-                  <p>Invite someone you trust, then send the first encrypted message or attachment.</p>
-                  <Button className="empty-action" size="sm" type="button" onClick={() => setShowInvite(true)}>
-                    <UserRoundPlus />
-                    Invite people
-                  </Button>
-                </div>
-              )}
+                    {(senderName.trim()[0] ?? '?').toUpperCase()}
+                  </span>
+                  <span>Sharing as <strong>{senderName.trim() || 'Anonymous guest'}</strong></span>
+                  <ChevronDown />
+                </Button>
+                <span className="identity-note">Name is not identity-verified</span>
+              </div>
+            </div>
 
-              {messages.map((message, index) => {
-                const own = message.senderId === session.deviceId
-                const content = message.content
-                const recalled = message.recalledAt !== undefined
-                const pinned = pinnedMessageId === message.id
-                const displayTimestamp =
-                  message.recalledAt ?? content?.clientCreatedAt ?? message.serverCreatedAt ?? Date.now()
-                const previous = messages[index - 1]
-                const previousTimestamp = previous === undefined
-                  ? 0
-                  : previous.recalledAt ??
-                    previous.content?.clientCreatedAt ??
-                    previous.serverCreatedAt ??
-                    0
-                const grouped = previous !== undefined &&
-                  previous.senderId === message.senderId &&
-                  previous.recalledAt === undefined &&
-                  !recalled &&
-                  displayTimestamp - previousTimestamp < 5 * 60 * 1_000
-                const senderLabel =
-                  content?.senderName ?? (recalled ? own ? 'You' : 'A participant' : 'Unverified sender')
-                return (
-                  <article
-                    className={`${own ? 'message own' : 'message'}${pinned ? ' is-pinned' : ''}${grouped ? ' grouped' : ''}${content?.kind === 'file' ? ' has-attachment' : ''}`}
-                    id={`message-${message.id}`}
-                    key={message.id}
-                  >
-                    <div className="message-meta">
-                      {grouped ? (
-                        <span className="visually-hidden">{senderLabel}</span>
+            {editingName && (
+              <div className="identity-editor">
+                <label htmlFor="sender-name">Display name</label>
+                <Input
+                  id="sender-name"
+                  className="sender-input"
+                  value={senderName}
+                  maxLength={40}
+                  autoFocus
+                  onChange={(event) => setSenderName(event.target.value)}
+                />
+                <Button variant="secondary" size="sm" type="button" onClick={() => setEditingName(false)}>
+                  Done
+                </Button>
+              </div>
+            )}
+
+            {transfers.length > 0 && (
+              <section className="attachment-tray" aria-label="File activity" aria-live="polite">
+                <div className="attachment-tray-heading">
+                  <strong>
+                    {hasActiveUploads
+                      ? `Sharing ${activeUploadCount} file${activeUploadCount === 1 ? '' : 's'}`
+                      : hasPendingFiles
+                        ? `${transfers.length} file${transfers.length === 1 ? '' : 's'} ready`
+                        : `${transfers.length} file${transfers.length === 1 ? '' : 's'} need attention`}
+                  </strong>
+                  <span>
+                    {hasActiveUploads
+                      ? 'Encrypting in this browser'
+                      : hasPendingFiles
+                        ? 'Ready to share'
+                        : 'Retry or remove'}
+                  </span>
+                </div>
+                <div className="attachment-tray-items">
+                  {transfers.map((transfer) => (
+                    <article className={`transfer-card ${transfer.status}`} key={transfer.id}>
+                      {transfer.previewUrl ? (
+                        <img className="transfer-thumbnail" src={transfer.previewUrl} alt="" />
                       ) : (
-                        <>
-                          <strong>{senderLabel}</strong>
-                          {own && <span className="own-label">This device</span>}
-                        </>
+                        <span className="transfer-glyph" aria-hidden="true">FILE</span>
                       )}
-                      {pinned && (
-                        <span className="message-pinned-label">
-                          <Pin />
-                          Pinned
+                      <div className="transfer-copy">
+                        <strong title={transfer.name}>{transfer.name}</strong>
+                        <span>
+                          {formatFileSize(transfer.size)} · {transfer.status === 'pending'
+                            ? 'Ready'
+                            : transfer.status === 'uploading'
+                              ? `Encrypting and uploading · ${Math.round(transfer.progress * 100)}%`
+                              : transfer.error}
                         </span>
+                        {transfer.status === 'uploading' && (
+                          <progress max={1} value={transfer.progress} aria-label={`${transfer.name} upload progress`} />
+                        )}
+                      </div>
+                      <div className="transfer-actions">
+                        {transfer.status === 'uploading' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            aria-label={`Cancel ${transfer.name} upload`}
+                            onClick={() => cancelTransfer(transfer.id)}
+                          >
+                            Cancel
+                          </Button>
+                        )}
+                        {transfer.status === 'failed' && transfer.file !== undefined && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            type="button"
+                            aria-label={`Retry ${transfer.name} upload`}
+                            onClick={() => retryTransfer(transfer.id)}
+                          >
+                            <RefreshCw />
+                            Retry
+                          </Button>
+                        )}
+                        {transfer.status !== 'uploading' && (
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            type="button"
+                            aria-label={`Remove ${transfer.name}`}
+                            onClick={() => removeTransfer(transfer.id)}
+                          >
+                            <X />
+                          </Button>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <div className="share-input-row">
+              <input
+                ref={fileInputRef}
+                className="visually-hidden"
+                type="file"
+                multiple
+                aria-label="Choose files"
+                onChange={uploadSelectedFiles}
+              />
+              <Button
+                className="file-pick-button"
+                variant="secondary"
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <Paperclip />
+                Add files
+              </Button>
+              <div className="share-text-field">
+                <Clipboard aria-hidden="true" />
+                <Textarea
+                  ref={composerTextareaRef}
+                  className="share-textarea"
+                  value={draft}
+                  maxLength={MAX_TEXT_CHARACTERS}
+                  rows={1}
+                  placeholder={hasPendingFiles ? 'Add optional clipboard text…' : 'Paste text or write a short note…'}
+                  aria-label="Shared text"
+                  aria-describedby="share-help share-count"
+                  onChange={(event) => setDraft(event.target.value)}
+                  onPaste={sendPastedFiles}
+                  onKeyDown={handleComposerKey}
+                />
+              </div>
+              <Button
+                className="share-button"
+                type="submit"
+                aria-label={hasPendingFiles && !draft.trim() ? 'Share files' : 'Share'}
+                disabled={!draft.trim() && !hasPendingFiles}
+              >
+                <span>{hasPendingFiles && !draft.trim() ? 'Share files' : 'Share'}</span>
+                <Send />
+              </Button>
+            </div>
+            <div className="share-footer" id="share-help">
+              <span>Drop or paste files anywhere here · Ctrl/⌘ + Enter to share text</span>
+              <span
+                className={draft.length > MAX_TEXT_CHARACTERS * 0.9 ? 'share-count nearing-limit' : 'share-count'}
+                id="share-count"
+              >
+                {draft.length}/{MAX_TEXT_CHARACTERS}
+              </span>
+            </div>
+            {composerError && <p className="inline-error" role="alert">{composerError}</p>}
+          </form>
+
+          <div className="resource-browser">
+            <aside className="resource-rail" aria-label="Shared resources">
+              <div className="resource-toolbar">
+                <div>
+                  <h2>Shared items</h2>
+                  <span>{resourceCounts.all} total</span>
+                </div>
+                <div className="resource-filters" role="tablist" aria-label="Filter shared items">
+                  {(['all', 'file', 'text'] as const).map((filter) => (
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={resourceFilter === filter}
+                      className={resourceFilter === filter ? 'active' : ''}
+                      key={filter}
+                      onClick={() => setResourceFilter(filter)}
+                    >
+                      {filter === 'all' ? 'All' : filter === 'file' ? 'Files' : 'Text'}
+                      <span>{resourceCounts[filter]}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div
+                ref={resourceListRef}
+                className="resource-list"
+                onScroll={handleResourceListScroll}
+              >
+                {newItemCount > 0 && (
+                  <Button className="new-items-button" type="button" size="sm" onClick={showNewestResources}>
+                    {newItemCount} new item{newItemCount === 1 ? '' : 's'}
+                  </Button>
+                )}
+                {visibleResources.length === 0 && (
+                  <div className="resource-empty-state">
+                    <span aria-hidden="true">{resourceFilter === 'file' ? <Files /> : resourceFilter === 'text' ? <Clipboard /> : <LockKeyhole />}</span>
+                    <h3>{resourceCounts.all === 0 ? 'Nothing shared yet' : `No ${resourceFilter} items`}</h3>
+                    <p>
+                      {resourceCounts.all === 0
+                        ? 'Add files or paste text above. Every item is encrypted in this browser.'
+                        : 'Choose another filter to see the rest of this room.'}
+                    </p>
+                  </div>
+                )}
+
+                {visibleResources.map((message) => {
+                  const own = message.senderId === session.deviceId
+                  const content = message.content
+                  const recalled = message.recalledAt !== undefined
+                  const pinned = pinnedMessageId === message.id
+                  const selected = selectedResourceId === message.id
+                  const timestamp = message.recalledAt ?? content?.clientCreatedAt ?? message.serverCreatedAt ?? Date.now()
+                  const senderLabel = content?.senderName ?? (recalled ? own ? 'You' : 'A participant' : 'Unverified sender')
+                  const senderStyle = { '--sender-hue': senderHue(message.senderId) } as CSSProperties
+                  return (
+                    <article
+                      className={`resource-item${selected ? ' selected' : ''}${pinned ? ' pinned' : ''}${recalled ? ' recalled' : ''}`}
+                      style={senderStyle}
+                      key={message.id}
+                    >
+                      <button
+                        className="resource-select"
+                        type="button"
+                        aria-current={selected ? 'true' : undefined}
+                        onClick={() => selectResource(message.id)}
+                      >
+                        <span className="resource-avatar" aria-hidden="true">
+                          {(senderLabel[0] ?? '?').toUpperCase()}
+                        </span>
+                        <span className="resource-item-main">
+                          <span className="resource-meta">
+                            <strong>{senderLabel}</strong>
+                            {own && <span className="own-label">This device</span>}
+                            <time dateTime={new Date(timestamp).toISOString()}>{formatTime(timestamp)}</time>
+                          </span>
+                          {recalled ? (
+                            <span className="resource-summary removed-summary">
+                              <RefreshCw />
+                              <span><strong>Removed item</strong><small>Removed by sender</small></span>
+                            </span>
+                          ) : content?.kind === 'file' ? (
+                            <span className="resource-summary">
+                              <File />
+                              <span>
+                                <strong title={content.file.name}>{content.file.name}</strong>
+                                <small>{formatFileSize(content.file.size)} · encrypted file</small>
+                              </span>
+                            </span>
+                          ) : content?.kind === 'text' ? (
+                            <span className="resource-text-summary">
+                              “{content.text.slice(0, TEXT_LIST_PREVIEW_CHARACTERS)}{content.text.length > TEXT_LIST_PREVIEW_CHARACTERS ? '…' : ''}”
+                            </span>
+                          ) : (
+                            <span className="resource-summary removed-summary">
+                              <CircleAlert />
+                              <span><strong>Could not verify item</strong><small>{message.error}</small></span>
+                            </span>
+                          )}
+                          <span className={`resource-delivery ${message.delivery}`}>
+                            {pinned && <span><Pin /> Pinned</span>}
+                            {!recalled && message.delivery === 'sending' && <span><LoaderCircle className="spinning" /> Sharing</span>}
+                            {!recalled && message.delivery === 'stored' && <span><CheckCheck /> Stored</span>}
+                            {!recalled && message.delivery === 'failed' && <span><CircleAlert /> Share failed</span>}
+                          </span>
+                        </span>
+                      </button>
+
+                      {!recalled && content?.kind === 'text' && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              className="resource-copy-button"
+                              variant="ghost"
+                              size="icon-sm"
+                              type="button"
+                              aria-label={`Copy text from ${senderLabel}`}
+                              onClick={() => copy(content.text, 'Text copied')}
+                            >
+                              <Copy />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent>Copy text</TooltipContent>
+                        </Tooltip>
                       )}
-                      <time dateTime={new Date(displayTimestamp).toISOString()}>
-                        {formatTime(displayTimestamp)}
-                      </time>
+
                       {!recalled && message.delivery === 'stored' && content !== null && (
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button
-                              className="message-actions-trigger"
+                              className="resource-actions-trigger"
                               variant="ghost"
                               size="icon-sm"
                               type="button"
-                              aria-label={`Message actions for ${senderLabel}`}
+                              aria-label={`Resource actions for ${senderLabel}`}
                             >
                               <Ellipsis />
                             </Button>
                           </DropdownMenuTrigger>
-                          <DropdownMenuContent align={own ? 'end' : 'start'}>
+                          <DropdownMenuContent align="end">
                             <DropdownMenuItem
                               disabled={pinningMessageId !== null}
                               onSelect={() => void updatePin(message.id, !pinned)}
@@ -657,263 +929,146 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
                                   )
                                 }}
                               >
-                                <RefreshCw />
-                                {message.recalling ? 'Recalling…' : 'Recall'}
+                                <X />
+                                {message.recalling ? 'Removing…' : 'Remove from room'}
                               </DropdownMenuItem>
                             )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       )}
-                    </div>
-                    <div className={recalled ? 'message-body recalled' : 'message-body'}>
-                      {recalled && <p className="recalled-message">Message recalled</p>}
-                      {!recalled && content?.kind === 'text' && <p>{content.text}</p>}
-                      {!recalled && content?.kind === 'file' && (
-                        <>
-                          {content.caption && <p>{content.caption}</p>}
-                          <Attachment descriptor={content.file} credentials={credentials} />
-                        </>
-                      )}
-                      {!recalled && content === null && <p className="integrity-error">{message.error}</p>}
-                    </div>
-                    <div className={`delivery ${message.delivery}`}>
-                      {recalled && <span>{own ? 'Recalled for everyone' : 'Recalled by sender'}</span>}
-                      {!recalled && message.delivery === 'sending' && (
-                        <span className="message-delivery-status"><LoaderCircle className="spinning" /> Sending</span>
-                      )}
-                      {!recalled && message.delivery === 'stored' && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="message-delivery-status">
-                              <CheckCheck />
-                              Stored
-                              <span className="visually-hidden">Ciphertext stored by server</span>
-                            </span>
-                          </TooltipTrigger>
-                          <TooltipContent>Ciphertext stored by the server</TooltipContent>
-                        </Tooltip>
-                      )}
-                      {!recalled && message.delivery === 'failed' && (
-                        <>
-                          <span className="message-delivery-status"><CircleAlert /> {message.error ?? 'Send failed'}</span>
-                          <Button variant="ghost" size="sm" type="button" onClick={() => retryMessage(message.id)}>
-                            <RefreshCw />
-                            Retry
-                          </Button>
-                        </>
-                      )}
-                      {own && content !== null && message.error && (
-                        <span className="recall-error">{message.error}</span>
-                      )}
-                    </div>
-                  </article>
-                )
-              })}
-
-              <div ref={timelineEndRef} />
-            </div>
-            {showJumpToLatest && (
-              <Button
-                type="button"
-                size="sm"
-                className="jump-to-latest"
-                onClick={() => scrollToLatest()}
-              >
-                <ArrowDown />
-                Jump to latest
-              </Button>
-            )}
-          </div>
-
-          <form
-            className="composer"
-            onSubmit={submitText}
-            onDragEnter={(event) => {
-              if (event.dataTransfer.types.includes('Files')) setIsDraggingFiles(true)
-            }}
-            onDragOver={(event) => {
-              if (!event.dataTransfer.types.includes('Files')) return
-              event.preventDefault()
-              event.dataTransfer.dropEffect = 'copy'
-            }}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingFiles(false)
-            }}
-            onDrop={queueDroppedFiles}
-          >
-            <div className="drop-hint" aria-hidden={!isDraggingFiles}>
-              <Paperclip />
-              <span>Drop files to attach them</span>
-            </div>
-            <div className="composer-inner">
-              <div className="composer-identity">
-                <Button
-                  className="identity-chip"
-                  variant="ghost"
-                  size="sm"
-                  type="button"
-                  aria-label="Change display name"
-                  aria-expanded={editingName}
-                  onClick={() => setEditingName((value) => !value)}
-                >
-                  <span className="identity-avatar" aria-hidden="true">
-                    {(senderName.trim()[0] ?? '?').toUpperCase()}
-                  </span>
-                  <span>Writing as <strong>{senderName.trim() || 'Anonymous guest'}</strong></span>
-                  <ChevronDown />
-                </Button>
-                <span className="identity-note">Encrypted, not identity-verified</span>
+                    </article>
+                  )
+                })}
               </div>
-              {editingName && (
-                <div className="identity-editor">
-                  <label htmlFor="sender-name">Display name</label>
-                  <Input
-                    id="sender-name"
-                    className="sender-input"
-                    value={senderName}
-                    maxLength={40}
-                    autoFocus
-                    onChange={(event) => setSenderName(event.target.value)}
-                  />
-                  <Button variant="secondary" size="sm" type="button" onClick={() => setEditingName(false)}>
-                    Done
-                  </Button>
+            </aside>
+
+            <section className={`resource-detail${mobileDetailOpen ? ' mobile-open' : ''}`} aria-label="Selected shared item">
+              <Button
+                className="mobile-detail-close"
+                variant="ghost"
+                size="icon"
+                type="button"
+                aria-label="Back to shared items"
+                onClick={() => setMobileDetailOpen(false)}
+              >
+                <X />
+              </Button>
+              {selectedResource === null ? (
+                <div className="detail-empty-state">
+                  <span aria-hidden="true"><Files /></span>
+                  <h2>Select an item to preview</h2>
+                  <p>Files decrypt only in this browser. Text stays ready to copy.</p>
                 </div>
-              )}
-              {transfers.length > 0 && (
-                <section className="attachment-tray" aria-label="Attachment activity" aria-live="polite">
-                  <div className="attachment-tray-heading">
-                    <strong>
-                      {hasActiveUploads
-                        ? `Sending ${activeUploadCount} attachment${activeUploadCount === 1 ? '' : 's'}`
-                        : hasPendingFiles
-                          ? `${transfers.length} attachment${transfers.length === 1 ? '' : 's'} ready`
-                          : `${transfers.length} attachment${transfers.length === 1 ? '' : 's'} need attention`}
-                    </strong>
-                    <span>
-                      {hasActiveUploads
-                        ? 'Encrypting in this browser'
-                        : hasPendingFiles
-                          ? 'Ready to send'
-                          : 'Retry or remove'}
-                    </span>
-                  </div>
-                  <div className="attachment-tray-items">
-                    {transfers.map((transfer) => (
-                      <article className={`transfer-card ${transfer.status}`} key={transfer.id}>
-                        {transfer.previewUrl ? (
-                          <img className="transfer-thumbnail" src={transfer.previewUrl} alt="" />
-                        ) : (
-                          <span className="transfer-glyph" aria-hidden="true">FILE</span>
-                        )}
-                        <div className="transfer-copy">
-                          <strong title={transfer.name}>{transfer.name}</strong>
-                          <span>
-                            {formatFileSize(transfer.size)} · {transfer.status === 'pending'
-                              ? 'Ready'
-                              : transfer.status === 'uploading'
-                                ? `Encrypting and uploading · ${Math.round(transfer.progress * 100)}%`
-                                : transfer.error}
-                          </span>
-                          {transfer.status === 'uploading' && (
-                            <progress max={1} value={transfer.progress} aria-label={`${transfer.name} upload progress`} />
-                          )}
+              ) : (() => {
+                const content = selectedResource.content
+                const own = selectedResource.senderId === session.deviceId
+                const recalled = selectedResource.recalledAt !== undefined
+                const pinned = selectedResource.id === pinnedMessageId
+                const timestamp = selectedResource.recalledAt ?? content?.clientCreatedAt ?? selectedResource.serverCreatedAt ?? Date.now()
+                const senderLabel = content?.senderName ?? (recalled ? own ? 'You' : 'A participant' : 'Unverified sender')
+                return (
+                  <div className="resource-detail-inner" key={selectedResource.id}>
+                    <header className="resource-detail-header">
+                      <div className="detail-sender" style={{ '--sender-hue': senderHue(selectedResource.senderId) } as CSSProperties}>
+                        <span className="resource-avatar" aria-hidden="true">{(senderLabel[0] ?? '?').toUpperCase()}</span>
+                        <span>
+                          <strong>{senderLabel}</strong>
+                          <small>{own ? 'This device · identity not verified' : 'Identity not verified'}</small>
+                        </span>
+                      </div>
+                      <div className="detail-meta">
+                        {pinned && <span><Pin /> Pinned</span>}
+                        <time dateTime={new Date(timestamp).toISOString()}>{formatTime(timestamp)}</time>
+                      </div>
+                    </header>
+
+                    {pinError && <p className="pin-error" role="alert">{pinError}</p>}
+
+                    {recalled ? (
+                      <div className="detail-removed-state">
+                        <RefreshCw aria-hidden="true" />
+                        <h2>Item removed from this room</h2>
+                        <p>The sender used their removal capability. The ordered notice remains visible to everyone.</p>
+                      </div>
+                    ) : content?.kind === 'text' ? (
+                      <div className="shared-text-detail">
+                        <div className="detail-content-heading">
+                          <div>
+                            <FileText aria-hidden="true" />
+                            <span><strong>Clipboard text</strong><small>{content.text.length.toLocaleString()} characters</small></span>
+                          </div>
+                          <Button type="button" onClick={() => copy(content.text, 'Text copied')}>
+                            <Copy />
+                            Copy text
+                          </Button>
                         </div>
-                        <div className="transfer-actions">
-                          {transfer.status === 'uploading' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              type="button"
-                              aria-label={`Cancel ${transfer.name} upload`}
-                              onClick={() => cancelTransfer(transfer.id)}
-                            >
-                              Cancel
-                            </Button>
-                          )}
-                          {transfer.status === 'failed' && transfer.file !== undefined && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              type="button"
-                              aria-label={`Retry ${transfer.name} upload`}
-                              onClick={() => retryTransfer(transfer.id)}
-                            >
+                        <pre tabIndex={0} dir="auto">{content.text}</pre>
+                      </div>
+                    ) : content?.kind === 'file' ? (
+                      <div className="shared-file-detail">
+                        {content.caption && <p className="file-caption">{content.caption}</p>}
+                        <Attachment
+                          key={selectedResource.id}
+                          descriptor={content.file}
+                          credentials={credentials}
+                          presentation="viewer"
+                        />
+                      </div>
+                    ) : (
+                      <div className="detail-removed-state error">
+                        <CircleAlert aria-hidden="true" />
+                        <h2>Could not verify this item</h2>
+                        <p>{selectedResource.error}</p>
+                      </div>
+                    )}
+
+                    {!recalled && (
+                      <footer className="resource-detail-footer">
+                        <div className={`resource-detail-status ${selectedResource.delivery}`}>
+                          {selectedResource.delivery === 'sending' && <><LoaderCircle className="spinning" /> Sharing encrypted item…</>}
+                          {selectedResource.delivery === 'stored' && <><CheckCheck /> Ciphertext stored by server</>}
+                          {selectedResource.delivery === 'failed' && <><CircleAlert /> {selectedResource.error ?? 'Share failed'}</>}
+                        </div>
+                        <div className="resource-detail-actions">
+                          {selectedResource.delivery === 'failed' && (
+                            <Button variant="outline" size="sm" type="button" onClick={() => retryMessage(selectedResource.id)}>
                               <RefreshCw />
                               Retry
                             </Button>
                           )}
-                          {transfer.status !== 'uploading' && (
+                          {selectedResource.delivery === 'stored' && content !== null && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              type="button"
+                              disabled={pinningMessageId !== null}
+                              onClick={() => void updatePin(selectedResource.id, !pinned)}
+                            >
+                              <Pin />
+                              {pinned ? 'Unpin selected item' : 'Pin selected item'}
+                            </Button>
+                          )}
+                          {own && selectedResource.recallToken !== undefined && (
                             <Button
                               variant="ghost"
-                              size="icon-sm"
+                              size="sm"
                               type="button"
-                              aria-label={`Remove ${transfer.name}`}
-                              onClick={() => removeTransfer(transfer.id)}
+                              className="danger"
+                              disabled={selectedResource.recalling}
+                              onClick={() => setRecallCandidateId(selectedResource.id)}
                             >
                               <X />
+                              {selectedResource.recalling ? 'Removing…' : 'Remove selected item'}
                             </Button>
                           )}
                         </div>
-                      </article>
-                    ))}
+                      </footer>
+                    )}
                   </div>
-                </section>
-              )}
-              <div className="composer-box">
-                <input
-                  ref={fileInputRef}
-                  className="visually-hidden"
-                  type="file"
-                  multiple
-                  aria-label="Choose attachments"
-                  onChange={uploadSelectedFiles}
-                />
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      className="attachment-button"
-                      variant="ghost"
-                      size="icon"
-                      type="button"
-                      aria-label="Add attachment"
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Paperclip />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>Add attachments</TooltipContent>
-                </Tooltip>
-                <Textarea
-                  ref={composerTextareaRef}
-                  className="composer-textarea"
-                  value={draft}
-                  maxLength={MAX_TEXT_CHARACTERS}
-                  rows={1}
-                  placeholder={hasPendingFiles ? 'Add a note, or send the files as they are…' : 'Write an encrypted message…'}
-                  aria-label="Message"
-                  aria-describedby="composer-help composer-count"
-                  onChange={(event) => setDraft(event.target.value)}
-                  onPaste={sendPastedFiles}
-                  onKeyDown={handleComposerKey}
-                />
-                <Button className="send-button" type="submit" disabled={!draft.trim() && !hasPendingFiles}>
-                  <span>{hasPendingFiles && !draft.trim() ? 'Send files' : 'Send'}</span>
-                  <Send />
-                </Button>
-              </div>
-              <div className="composer-footer" id="composer-help">
-                <span>Enter to send · Shift+Enter for a new line · Paste files to send instantly</span>
-                <span
-                  className={draft.length > MAX_TEXT_CHARACTERS * 0.9 ? 'composer-count nearing-limit' : 'composer-count'}
-                  id="composer-count"
-                >
-                  {draft.length}/{MAX_TEXT_CHARACTERS}
-                </span>
-              </div>
-              {composerError && <p className="inline-error" role="alert">{composerError}</p>}
-            </div>
-          </form>
+                )
+              })()}
+            </section>
+          </div>
         </section>
 
         {showInvite && (
@@ -959,52 +1114,48 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
           </SecurityDialog>
         )}
 
-      {recallCandidateId !== null && (
-        <SecurityDialog
-          title="Recall message?"
-          className="recall-dialog"
-          onClose={() => setRecallCandidateId(null)}
-        >
-          <p>
-            This removes the encrypted message from the room and replaces it with a recall notice
-            for everyone. This cannot be undone.
-          </p>
-          <div className="recall-dialog-actions">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setRecallCandidateId(null)}
-            >
-              Keep message
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => {
-                const messageId = recallCandidateId
-                setRecallCandidateId(null)
-                void recallMessage(messageId)
-              }}
-            >
-              Recall for everyone
-            </Button>
-          </div>
-        </SecurityDialog>
-      )}
+        {recallCandidateId !== null && (
+          <SecurityDialog
+            title="Remove item from room?"
+            className="recall-dialog"
+            onClose={() => setRecallCandidateId(null)}
+          >
+            <p>
+              This removes the encrypted item from the room and leaves an ordered removal notice
+              for everyone. This cannot be undone.
+            </p>
+            <div className="recall-dialog-actions">
+              <Button type="button" variant="outline" onClick={() => setRecallCandidateId(null)}>
+                Keep item
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => {
+                  const messageId = recallCandidateId
+                  setRecallCandidateId(null)
+                  void recallMessage(messageId)
+                }}
+              >
+                Remove for everyone
+              </Button>
+            </div>
+          </SecurityDialog>
+        )}
 
-      {showSecurity && (
-        <SecurityDialog title="Security and retention" onClose={() => setShowSecurity(false)}>
-          <dl className="security-facts">
-            <div><dt>Message encryption</dt><dd>AES-256-GCM with a separate key and monotonic nonce for every sending session</dd></div>
-            <div><dt>Attachment encryption</dt><dd>Chunked AES-256-GCM; previews are generated only after local decryption</dd></div>
-            <div><dt>Message retention</dt><dd>Encrypted messages are retained for up to seven days, or until the room expires if sooner</dd></div>
-            <div><dt>Room expires</dt><dd>{new Date(session.expiresAt).toLocaleString('en-US')}</dd></div>
-            <div><dt>Identity model</dt><dd>Public room ID plus a secure link or password; display names and device labels are not authenticated identities</dd></div>
-            <div><dt>Visible metadata</dt><dd>The server can observe IP addresses, connection times, traffic sizes, and online session counts</dd></div>
-          </dl>
-          <p className="security-warning">This version does not provide forward secrecy, individual member revocation, or enterprise SSO.</p>
-        </SecurityDialog>
-      )}
+        {showSecurity && (
+          <SecurityDialog title="Security and retention" onClose={() => setShowSecurity(false)}>
+            <dl className="security-facts">
+              <div><dt>Text encryption</dt><dd>AES-256-GCM with a separate key and monotonic nonce for every sending session</dd></div>
+              <div><dt>File encryption</dt><dd>Chunked AES-256-GCM; previews are generated only after local decryption</dd></div>
+              <div><dt>Item retention</dt><dd>Encrypted items are retained for up to seven days, or until the room expires if sooner</dd></div>
+              <div><dt>Room expires</dt><dd>{new Date(session.expiresAt).toLocaleString('en-US')}</dd></div>
+              <div><dt>Identity model</dt><dd>Public room ID plus a secure link or password; display names and device colors are not authenticated identities</dd></div>
+              <div><dt>Visible metadata</dt><dd>The server can observe IP addresses, connection times, traffic sizes, and online device counts</dd></div>
+            </dl>
+            <p className="security-warning">This version does not provide forward secrecy, individual member revocation, or enterprise SSO.</p>
+          </SecurityDialog>
+        )}
         <Toaster theme={theme === 'night' ? 'dark' : 'light'} richColors />
       </main>
     </TooltipProvider>

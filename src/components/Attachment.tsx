@@ -1,4 +1,4 @@
-import { Download, ExternalLink, RotateCcw } from 'lucide-react'
+import { Download, ExternalLink, RotateCcw, ShieldCheck } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type { FileDescriptor } from '../shared/protocol'
@@ -13,6 +13,7 @@ import { Button } from './ui/button'
 interface AttachmentProps {
   descriptor: FileDescriptor
   credentials: FileTransferCredentials
+  presentation?: 'card' | 'viewer'
 }
 
 const PREVIEW_LIMIT_BYTES = 64 * 1024 * 1024
@@ -49,7 +50,7 @@ function safeDownloadName(name: string): string {
   return safeName || 'encrypted-file'
 }
 
-export function Attachment({ descriptor, credentials }: AttachmentProps) {
+export function Attachment({ descriptor, credentials, presentation = 'card' }: AttachmentProps) {
   const [objectUrl, setObjectUrl] = useState('')
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null)
   const [previewText, setPreviewText] = useState<string | null>(null)
@@ -228,6 +229,106 @@ export function Attachment({ descriptor, credentials }: AttachmentProps) {
   function closePreview() {
     abortRef.current?.abort()
     setPreviewOpen(false)
+  }
+
+  async function prepareInlinePreview() {
+    try {
+      await ensurePreviewUrl()
+    } catch {
+      // The viewer keeps a clear retry state visible.
+    }
+  }
+
+  if (presentation === 'viewer') {
+    return (
+      <section ref={attachmentRef} className="attachment attachment-viewer" aria-label={`File: ${descriptor.name}`}>
+        <header className="attachment-viewer-toolbar">
+          <div className="attachment-viewer-title">
+            <span className="file-glyph" aria-hidden="true">{previewGlyph}</span>
+            <span>
+              <strong title={descriptor.name}>{descriptor.name}</strong>
+              <small>{fileSize(descriptor.size)} · encrypted file</small>
+            </span>
+          </div>
+          <div className="attachment-viewer-actions">
+            <Button variant="outline" size="sm" type="button" disabled={loading} onClick={download}>
+              <Download />
+              Download
+            </Button>
+            {objectUrl && previewBlob && (
+              <Button asChild size="sm">
+                <a href={objectUrl} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink />
+                  Open separately
+                </a>
+              </Button>
+            )}
+          </div>
+        </header>
+
+        <div className="attachment-viewer-stage">
+          {loading && (
+            <div className="preview-loading-state" aria-live="polite">
+              <span className="preview-loading-art" aria-hidden="true"><i /></span>
+              <h3>Preparing local preview</h3>
+              <p>Downloading encrypted pieces, checking integrity, then decrypting them here.</p>
+              <div className="preview-loading-progress">
+                <progress max={1} value={progress} aria-label={`${descriptor.name} preview progress`} />
+                <span>{Math.round(progress * 100)}%</span>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={cancelLoad}>Cancel preview</Button>
+            </div>
+          )}
+          {!loading && error && (!objectUrl || !previewBlob) && (
+            <div className="preview-error-state" role="alert">
+              <span aria-hidden="true">!</span>
+              <h3>Preview could not be prepared</h3>
+              <p>{error}</p>
+              <Button type="button" size="sm" onClick={prepareInlinePreview}>
+                <RotateCcw />
+                Try again
+              </Button>
+            </div>
+          )}
+          {!loading && !error && previewType === 'none' && (
+            <div className="attachment-no-preview">
+              <span className="viewer-file-glyph" aria-hidden="true">{previewGlyph}</span>
+              <h3>Download to open this file</h3>
+              <p>
+                {descriptor.size > PREVIEW_LIMIT_BYTES
+                  ? 'Files over 64 MB are not previewed to protect browser memory.'
+                  : 'This file type does not have a safe browser-local preview.'}
+              </p>
+              <Button type="button" onClick={download}><Download /> Download file</Button>
+            </div>
+          )}
+          {!loading && !error && previewType !== 'none' && !objectUrl && (
+            <div className="attachment-no-preview">
+              <span className="viewer-file-glyph" aria-hidden="true">{previewGlyph}</span>
+              <h3>Preview in this browser</h3>
+              <p>The file will be downloaded, integrity-checked, and decrypted only on this device.</p>
+              <Button type="button" onClick={prepareInlinePreview}>Load preview</Button>
+            </div>
+          )}
+          {!loading && previewType === 'image' && objectUrl && previewBlob && (
+            <div className="viewer-image-preview">
+              <img src={objectUrl} alt={descriptor.name} />
+            </div>
+          )}
+          {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
+            <PdfPreview url={objectUrl} name={descriptor.name} />
+          )}
+          {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
+            <div className="viewer-text-preview">
+              <pre tabIndex={0} dir="auto" aria-label={`${descriptor.name} text content`}>
+                {previewText === '' ? 'This text file is empty.' : previewText}
+              </pre>
+            </div>
+          )}
+        </div>
+        <p className="attachment-viewer-privacy"><ShieldCheck /> Preview decrypted only in this browser</p>
+      </section>
+    )
   }
 
   return (

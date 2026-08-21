@@ -92,11 +92,11 @@ async function chooseRoomMenuItem(
   await user.click(await screen.findByRole('menuitem', { name }))
 }
 
-async function chooseMessageAction(
+async function chooseResourceAction(
   user: UserEvent,
   name: string,
 ) {
-  await user.click(await screen.findByRole('button', { name: /Message actions for/u }))
+  await user.click((await screen.findAllByRole('button', { name: /Resource actions for/u }))[0])
   await user.click(await screen.findByRole('menuitem', { name }))
 }
 
@@ -194,11 +194,11 @@ describe('SecretGram application', () => {
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
 
-    expect(await screen.findByRole('heading', { name: 'Secure room' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Encrypted sharing room' })).toBeInTheDocument()
     expect(window.location.pathname).toMatch(/^\/r\/[0-9A-HJKMNP-TV-Z]{6}$/)
     expect(window.location.hash).toBe('')
     expect(screen.queryByRole('button', { name: 'Copy room ID' })).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveFocus())
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Shared text' })).toHaveFocus())
 
     await user.click(screen.getByRole('button', { name: 'Invite' }))
     expect(screen.getByText(window.location.pathname)).toBeInTheDocument()
@@ -215,7 +215,7 @@ describe('SecretGram application', () => {
     await user.type(screen.getByLabelText('Optional room password'), 'correct horse')
     await user.type(screen.getByLabelText('Confirm password'), 'correct horse')
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
-    await screen.findByRole('heading', { name: 'Secure room' })
+    await screen.findByRole('heading', { name: 'Encrypted sharing room' })
     const roomId = window.location.pathname.slice('/r/'.length)
     const createdLocator = vi.mocked(createRoom).mock.calls[0]?.[0]
 
@@ -227,50 +227,50 @@ describe('SecretGram application', () => {
     await user.type(screen.getByLabelText('Room ID or invitation link'), roomId)
     await user.type(screen.getByLabelText('Room password'), 'correct horse')
     await user.click(screen.getByRole('button', { name: 'Join room' }))
-    expect(await screen.findByRole('heading', { name: 'Secure room' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Encrypted sharing room' })).toBeInTheDocument()
     expect(getRoomInfo).toHaveBeenCalledWith(
       createdLocator,
       expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
     )
   })
 
-  it('recalls a sent message through an in-app confirmation dialog', async () => {
+  it('removes a shared item through an in-app confirmation dialog', async () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
-    await screen.findByRole('heading', { name: 'Secure room' })
+    await screen.findByRole('heading', { name: 'Encrypted sharing room' })
 
-    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Please remove this')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
+    await user.type(screen.getByRole('textbox', { name: 'Shared text' }), 'Please remove this')
+    await user.click(screen.getByRole('button', { name: 'Share' }))
     expect(await screen.findByText('Please remove this')).toBeInTheDocument()
-    await chooseMessageAction(user, 'Recall')
+    await chooseResourceAction(user, 'Remove from room')
 
-    expect(await screen.findByRole('dialog', { name: 'Recall message?' })).toBeInTheDocument()
+    expect(await screen.findByRole('dialog', { name: 'Remove item from room?' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Close' })).toHaveFocus()
     expect(recallRoomMessage).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Keep message' }))
-    expect(screen.queryByRole('dialog', { name: 'Recall message?' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Keep item' }))
+    expect(screen.queryByRole('dialog', { name: 'Remove item from room?' })).not.toBeInTheDocument()
     expect(screen.getByText('Please remove this')).toBeInTheDocument()
 
-    await chooseMessageAction(user, 'Recall')
-    await user.click(await screen.findByRole('button', { name: 'Recall for everyone' }))
+    await chooseResourceAction(user, 'Remove from room')
+    await user.click(await screen.findByRole('button', { name: 'Remove for everyone' }))
     await waitFor(() => expect(recallRoomMessage).toHaveBeenCalledTimes(1))
-    expect(await screen.findByText('Message recalled')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Item removed from this room' })).toBeInTheDocument()
     expect(screen.queryByText('Please remove this')).not.toBeInTheDocument()
-    expect(screen.getByText('Recalled for everyone')).toBeInTheDocument()
+    expect(screen.getByText('Removed item')).toBeInTheDocument()
   })
 
-  it('pins, unpins, and clears a recalled room message', async () => {
+  it('pins, unpins, and clears a removed shared item', async () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
-    await screen.findByRole('heading', { name: 'Secure room' })
+    await screen.findByRole('heading', { name: 'Encrypted sharing room' })
 
-    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Keep this in view')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
-    await chooseMessageAction(user, 'Pin')
+    await user.type(screen.getByRole('textbox', { name: 'Shared text' }), 'Keep this in view')
+    await user.click(screen.getByRole('button', { name: 'Share' }))
+    await chooseResourceAction(user, 'Pin')
 
     await waitFor(() => expect(setRoomPin).toHaveBeenCalledWith(
       expect.any(String),
@@ -278,31 +278,26 @@ describe('SecretGram application', () => {
       expect.any(String),
       true,
     ))
-    const banner = await screen.findByLabelText('Pinned message')
-    expect(banner).toHaveTextContent('Pinned')
-    expect(banner).toHaveTextContent('Keep this in view')
-    expect(within(banner).getByRole('button', { name: 'Jump to pinned message' })).toBeInTheDocument()
-    expect(document.querySelector('article.is-pinned')).toBeInTheDocument()
-    expect(screen.getByText('Pinned', { selector: '.message-pinned-label' })).toBeInTheDocument()
+    const pinnedItem = document.querySelector('article.resource-item.pinned')
+    expect(pinnedItem).toBeInstanceOf(HTMLElement)
+    if (!(pinnedItem instanceof HTMLElement)) throw new Error('Pinned resource was not rendered')
+    expect(pinnedItem).toHaveTextContent('Keep this in view')
+    expect(within(pinnedItem).getByText('Pinned')).toBeInTheDocument()
 
-    await user.click(within(banner).getByRole('button', { name: 'Unpin message' }))
+    await user.click(screen.getByRole('button', { name: 'Unpin selected item' }))
     await waitFor(() => expect(setRoomPin).toHaveBeenLastCalledWith(
       expect.any(String),
       expect.any(String),
       expect.any(String),
       false,
     ))
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Pinned message')).not.toBeInTheDocument()
-    })
+    await waitFor(() => expect(document.querySelector('article.resource-item.pinned')).toBeNull())
 
-    await chooseMessageAction(user, 'Pin')
-    await screen.findByLabelText('Pinned message')
-    await chooseMessageAction(user, 'Recall')
-    await user.click(await screen.findByRole('button', { name: 'Recall for everyone' }))
-    await waitFor(() => {
-      expect(screen.queryByLabelText('Pinned message')).not.toBeInTheDocument()
-    })
+    await chooseResourceAction(user, 'Pin')
+    await waitFor(() => expect(document.querySelector('article.resource-item.pinned')).not.toBeNull())
+    await chooseResourceAction(user, 'Remove from room')
+    await user.click(await screen.findByRole('button', { name: 'Remove for everyone' }))
+    await waitFor(() => expect(document.querySelector('article.resource-item.pinned')).toBeNull())
   })
 
   it('joins from a secure short link and clears the path after leaving', async () => {
@@ -313,7 +308,7 @@ describe('SecretGram application', () => {
 
     expect(screen.getByLabelText('Room ID or invitation link')).toHaveValue('ABC123')
     await user.click(screen.getByRole('button', { name: 'Join room' }))
-    expect(await screen.findByRole('heading', { name: 'Secure room' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Encrypted sharing room' })).toBeInTheDocument()
     expect(window.location.pathname).toBe('/r/ABC123')
     expect(window.location.hash).toBe('')
 
@@ -327,7 +322,7 @@ describe('SecretGram application', () => {
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
-    await screen.findByRole('heading', { name: 'Secure room' })
+    await screen.findByRole('heading', { name: 'Encrypted sharing room' })
 
     expect(screen.queryByRole('textbox', { name: 'Display name' })).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Change display name' }))
@@ -336,20 +331,20 @@ describe('SecretGram application', () => {
     await user.type(displayName, 'Quiet guest')
     await user.click(screen.getByRole('button', { name: 'Done' }))
 
-    await user.type(screen.getByRole('textbox', { name: 'Message' }), 'Sent with a chosen name')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
-    const messageText = await screen.findByText('Sent with a chosen name')
-    const message = messageText.closest('article')
-    if (!(message instanceof HTMLElement)) throw new Error('Message article was not rendered')
-    expect(within(message).getByText('Quiet guest')).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: 'Shared text' }), 'Sent with a chosen name')
+    await user.click(screen.getByRole('button', { name: 'Share' }))
+    await screen.findByText('Sent with a chosen name')
+    const resource = document.querySelector('article.resource-item')
+    if (!(resource instanceof HTMLElement)) throw new Error('Shared resource was not rendered')
+    expect(within(resource).getByText('Quiet guest')).toBeInTheDocument()
   })
 
-  it('groups consecutive messages and restores focus from the room menu', async () => {
+  it('orders clipboard items newest-first, filters them, and restores room-menu focus', async () => {
     const user = userEvent.setup()
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
-    await screen.findByRole('heading', { name: 'Secure room' })
+    await screen.findByRole('heading', { name: 'Encrypted sharing room' })
 
     const roomMenu = screen.getByRole('button', { name: 'Room menu' })
     await user.click(roomMenu)
@@ -357,17 +352,20 @@ describe('SecretGram application', () => {
     await user.keyboard('{Escape}')
     expect(roomMenu).toHaveFocus()
 
-    const composer = screen.getByRole('textbox', { name: 'Message' })
-    await user.type(composer, 'First grouped message')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
-    await screen.findByText('First grouped message')
-    await user.type(composer, 'Second grouped message')
-    await user.click(screen.getByRole('button', { name: 'Send' }))
-    await screen.findByText('Second grouped message')
+    const sharedText = screen.getByRole('textbox', { name: 'Shared text' })
+    await user.type(sharedText, 'First clipboard item')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await screen.findByText('First clipboard item')
+    await user.type(sharedText, 'Second clipboard item')
+    await user.click(screen.getByRole('button', { name: 'Share' }))
+    await screen.findByText('Second clipboard item')
 
-    const messages = document.querySelectorAll('article.message')
-    expect(messages).toHaveLength(2)
-    expect(messages[1]).toHaveClass('grouped')
+    const resources = document.querySelectorAll('article.resource-item')
+    expect(resources).toHaveLength(2)
+    expect(resources[0]).toHaveTextContent('Second clipboard item')
+    expect(resources[1]).toHaveTextContent('First clipboard item')
+    await user.click(screen.getByRole('tab', { name: /Text\s*2/u }))
+    expect(document.querySelectorAll('article.resource-item')).toHaveLength(2)
   })
 
 
@@ -377,10 +375,10 @@ describe('SecretGram application', () => {
     const user = userEvent.setup()
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
-    await screen.findByRole('heading', { name: 'Secure room' })
+    await screen.findByRole('heading', { name: 'Encrypted sharing room' })
 
     const file = new File(['pasted'], 'pasted.txt', { type: 'text/plain' })
-    fireEvent.paste(screen.getByRole('textbox', { name: 'Message' }), {
+    fireEvent.paste(screen.getByRole('textbox', { name: 'Shared text' }), {
       clipboardData: {
         items: [{ kind: 'file', getAsFile: () => file }],
         files: [file],
@@ -391,7 +389,7 @@ describe('SecretGram application', () => {
     expect(screen.getByText('pasted.txt')).toBeInTheDocument()
     expect(await screen.findByText(/Upload stopped for test/u)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Retry pasted.txt upload' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Share' })).toBeDisabled()
   })
 
   it('does not start later queued uploads after leaving the room', async () => {
@@ -414,14 +412,14 @@ describe('SecretGram application', () => {
     render(<App />)
     await user.click(screen.getByRole('tab', { name: 'Create room' }))
     await user.click(screen.getByRole('button', { name: 'Create secure room' }))
-    await screen.findByRole('heading', { name: 'Secure room' })
+    await screen.findByRole('heading', { name: 'Encrypted sharing room' })
 
-    await user.upload(screen.getByLabelText('Choose attachments'), [
+    await user.upload(screen.getByLabelText('Choose files'), [
       new File(['one'], 'one.txt', { type: 'text/plain' }),
       new File(['two'], 'two.txt', { type: 'text/plain' }),
     ])
     expect(uploadEncryptedFile).not.toHaveBeenCalled()
-    await user.click(screen.getByRole('button', { name: 'Send files' }))
+    await user.click(screen.getByRole('button', { name: 'Share files' }))
     await waitFor(() => expect(uploadEncryptedFile).toHaveBeenCalledTimes(1))
     await chooseRoomMenuItem(user, 'Leave room')
     await Promise.resolve()

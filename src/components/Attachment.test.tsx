@@ -134,6 +134,24 @@ describe('Attachment lifecycle', () => {
     expect(document.querySelector('.modal-text-preview script')).toBeNull()
   })
 
+  it('renders selected plain-text files directly in the workspace viewer', async () => {
+    const text = 'Shared workspace preview'
+    vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob([text], { type: 'text/plain' }))
+
+    render(
+      <Attachment
+        descriptor={{ ...descriptor, name: 'workspace.txt', mimeType: 'text/plain', size: text.length }}
+        credentials={credentials}
+        presentation="viewer"
+      />,
+    )
+
+    expect(await screen.findByLabelText('workspace.txt text content')).toHaveTextContent(text)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Open separately' })).toHaveAttribute('href', 'blob:test')
+    expect(screen.getByText('Preview decrypted only in this browser')).toBeInTheDocument()
+  })
+
   it('keeps plain-text files over 1 MB download-only', () => {
     render(
       <Attachment
