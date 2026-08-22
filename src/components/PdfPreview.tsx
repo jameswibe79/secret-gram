@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight, Minus, Plus, RotateCcw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type * as LegacyPdfViewerModule from 'pdfjs-dist/legacy/web/pdf_viewer.mjs'
 import type {
   PDFDocumentLoadingTask,
@@ -8,7 +9,10 @@ import type {
 } from 'pdfjs-dist'
 import type * as PdfViewerModule from 'pdfjs-dist/web/pdf_viewer.mjs'
 import 'pdfjs-dist/web/pdf_viewer.css'
+import { recognizeImage } from '../lib/ocr-client'
+import type { OcrLine, OcrProgress } from '../lib/ocr-types'
 import { loadPdfJs, loadPdfViewer, type PdfBuild } from '../lib/pdf-runtime'
+import { SelectableTextLayer } from './SelectableTextLayer'
 
 import { Button } from './ui/button'
 
@@ -18,6 +22,7 @@ type PdfViewerEventBus = PdfViewerModule.EventBus | LegacyPdfViewerModule.EventB
 const PDF_RENDER_TIMEOUT_MS = 12_000
 const MOBILE_PDF_MAX_CANVAS_PIXELS = 8 * 1024 * 1024
 const DESKTOP_PDF_MAX_CANVAS_PIXELS = 24 * 1024 * 1024
+const PDF_OCR_LONG_SIDE = 1600
 
 
 function withTimeout<T>(operation: Promise<T>, timeoutMs: number): Promise<T> {
@@ -49,6 +54,29 @@ function pdfMaxCanvasPixels(): number {
   return narrowViewport && navigator.maxTouchPoints > 0
     ? MOBILE_PDF_MAX_CANVAS_PIXELS
     : DESKTOP_PDF_MAX_CANVAS_PIXELS
+}
+function pdfPageHasSelectableText(items: unknown): boolean {
+  if (typeof items !== 'object' || items === null) return false
+  const values = Reflect.get(items, 'items')
+  if (!Array.isArray(values)) return false
+  let characters = 0
+  let textItems = 0
+  for (const item of values) {
+    if (typeof item !== 'object' || item === null) continue
+    const value = Reflect.get(item, 'str')
+    if (typeof value !== 'string' || value.trim() === '') continue
+    characters += value.trim().length
+    textItems += 1
+  }
+  return characters >= 12 || textItems >= 3
+}
+
+function pdfOcrProgressLabel(progress: OcrProgress | null): string {
+  if (progress === null || progress.stage === 'loading-models') return 'Loading local Chinese and English OCR…'
+  if (progress.stage === 'detecting') return 'Finding text on this scanned page…'
+  return progress.total === 0
+    ? 'Reading this scanned page…'
+    : `Reading line ${progress.completed} of ${progress.total}…`
 }
 
 interface PdfThumbnailProps {
@@ -192,10 +220,16 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
   const [build, setBuild] = useState<PdfBuild>('modern')
   const [retryCount, setRetryCount] = useState(0)
   const [error, setError] = useState('')
+  const [pdfDocument, setPdfDocument] = useState<PDFDocumentProxy | null>(null)
+  const [ocrLines, setOcrLines] = useState<OcrLine[]>([])
+  const [ocrProgress, setOcrProgress] = useState<OcrProgress | null>(null)
+  const [ocrStatus, setOcrStatus] = useState<'idle' | 'native' | 'recognizing' | 'ready' | 'empty' | 'error'>('idle')
+  const [ocrRetryCount, setOcrRetryCount] = useState(0)
 
   useEffect(() => {
     setBuild('modern')
     setRetryCount(0)
+    setOcrRetryCount(0)
   }, [data])
 
   useEffect(() => {
@@ -214,6 +248,7 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
     setError('')
     setPageNumber(1)
     setPageCount(0)
+    setPdfDocument(null)
     viewerElement.replaceChildren()
 
     const operation = (async () => {
@@ -262,6 +297,7 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
       loadingTask = pdfJs.getDocument({ data: new Uint8Array(buffer) })
       const document = await loadingTask.promise
       if (stopped) return
+      setPdfDocument(document)
       setPageCount(document.numPages)
       viewer.setDocument(document)
       linkService.setDocument(document)
@@ -286,10 +322,67 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
         if (onScaleChanging !== null) eventBus.off('scalechanging', onScaleChanging)
       }
       viewerRef.current = null
+      setPdfDocument(null)
       if (loadingTask !== null) void loadingTask.destroy()
       viewerElement.replaceChildren()
     }
   }, [build, data, retryCount])
+  useEffect(() => {
+    if (loading || pdfDocument === null) return
+    const controller = new AbortController()
+    let renderTask: RenderTask | null = null
+    setOcrLines([])
+    setOcrProgress(null)
+    setOcrStatus('idle')
+
+    const operation = (async () => {
+      const page = await pdfDocument.getPage(pageNumber)
+      const textContent = await page.getTextContent()
+      if (controller.signal.aborted) return
+      if (pdfPageHasSelectableText(textContent)) {
+        setOcrStatus('native')
+        return
+      }
+
+      setOcrStatus('recognizing')
+      const baseViewport = page.getViewport({ scale: 1 })
+      const scale = Math.min(2, PDF_OCR_LONG_SIDE / Math.max(baseViewport.width, baseViewport.height))
+      const viewport = page.getViewport({ scale })
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.ceil(viewport.width))
+      canvas.height = Math.max(1, Math.ceil(viewport.height))
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      if (context === null) throw new Error('PDF page pixels are unavailable')
+      renderTask = page.render({ canvas, viewport })
+      await renderTask.promise
+      if (controller.signal.aborted) return
+      const result = await recognizeImage(
+        context.getImageData(0, 0, canvas.width, canvas.height),
+        {
+          signal: controller.signal,
+          onProgress: setOcrProgress,
+        },
+      )
+      if (controller.signal.aborted) return
+      setOcrLines(result.lines)
+      setOcrStatus(result.lines.length === 0 ? 'empty' : 'ready')
+    })()
+
+    void operation.catch((ocrError: unknown) => {
+      if (
+        controller.signal.aborted ||
+        (ocrError instanceof Error && ocrError.name === 'RenderingCancelledException')
+      ) {
+        return
+      }
+      setOcrStatus('error')
+    })
+
+    return () => {
+      controller.abort()
+      renderTask?.cancel()
+    }
+  }, [loading, ocrRetryCount, pageNumber, pdfDocument])
 
   function moveToPage(nextPage: number) {
     const viewer = viewerRef.current
@@ -314,6 +407,9 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
     setBuild('legacy')
     setRetryCount((count) => count + 1)
   }
+  const ocrPageElement = viewerElementRef.current?.querySelector<HTMLElement>(
+    `.page[data-page-number="${pageNumber}"]`,
+  ) ?? null
 
   return (
     <section className="pdf-document-preview" aria-label={`${name} PDF preview`}>
@@ -353,6 +449,19 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
             <ChevronRight />
           </Button>
         </div>
+        {ocrStatus !== 'idle' && (
+          <div className={`pdf-ocr-status${ocrStatus === 'error' ? ' is-error' : ''}`} aria-live="polite">
+            {ocrStatus === 'native' && <span>PDF text selectable</span>}
+            {ocrStatus === 'recognizing' && <span>{pdfOcrProgressLabel(ocrProgress)}</span>}
+            {ocrStatus === 'ready' && <span>{ocrLines.length} OCR lines selectable</span>}
+            {ocrStatus === 'empty' && <span>No selectable text found</span>}
+            {ocrStatus === 'error' && (
+              <button type="button" onClick={() => setOcrRetryCount((count) => count + 1)}>
+                Retry text recognition
+              </button>
+            )}
+          </div>
+        )}
         <div className="pdf-zoom-controls" aria-label="PDF zoom controls">
           <Button variant="ghost" size="icon-sm" type="button" aria-label="Zoom out" disabled={loading} onClick={() => zoom(-1)}>
             <Minus />
@@ -381,6 +490,10 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
           </div>
         )}
       </div>
+      {ocrPageElement !== null && ocrLines.length > 0 && createPortal(
+        <SelectableTextLayer lines={ocrLines} label={`${name} page ${pageNumber} recognized selectable text`} />,
+        ocrPageElement,
+      )}
     </section>
   )
 }

@@ -17,6 +17,14 @@ vi.mock('./PdfPreview', () => ({
     ? <canvas aria-label={`${name} PDF thumbnail`} />
     : <section aria-label={`${name} PDF preview`}>Styled PDF reader</section>,
 }))
+vi.mock('./ImagePreview', () => ({
+  ImagePreview: ({ name, url }: { name: string; url: string }) => (
+    <div aria-label={`${name} selectable image preview`}>
+      <img src={url} alt={name} />
+      <span>{name} selectable text</span>
+    </div>
+  ),
+}))
 
 const descriptor: FileDescriptor = {
   fileId: '00000000-0000-4000-8000-000000000001',

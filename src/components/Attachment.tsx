@@ -6,6 +6,7 @@ import {
   downloadDecryptedFile,
   type FileTransferCredentials,
 } from '../lib/file-transfer'
+import { ImagePreview } from './ImagePreview'
 import { SecurityDialog } from './SecurityDialog'
 import { PdfPreview } from './PdfPreview'
 import { Button } from './ui/button'
@@ -329,9 +330,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             </div>
           )}
           {!loading && previewType === 'image' && objectUrl && previewBlob && (
-            <div className="viewer-image-preview">
-              <img src={objectUrl} alt={descriptor.name} />
-            </div>
+            <ImagePreview url={objectUrl} name={descriptor.name} variant="viewer" />
           )}
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
             <PdfPreview data={previewBlob} name={descriptor.name} />
@@ -476,9 +475,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             </div>
           )}
           {!loading && previewType === 'image' && objectUrl && previewBlob && (
-            <div className="modal-image-preview">
-              <img src={objectUrl} alt={descriptor.name} />
-            </div>
+            <ImagePreview url={objectUrl} name={descriptor.name} variant="modal" />
           )}
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
             <PdfPreview data={previewBlob} name={descriptor.name} />
