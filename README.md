@@ -4,6 +4,8 @@ SecretGram is a temporary, end-to-end encrypted room for text messages and files
 
 The interface and documentation use English by default.
 
+![SecretGram encrypted room interface](docs/images/secretgram-home.webp)
+
 ## Status
 
 SecretGram is a deployable reference implementation, not an independently audited cryptographic product. Before using it for regulated or enterprise workloads, complete an external security review and define your organization's identity, retention, data residency, endpoint protection, content governance, and incident-response policies.
