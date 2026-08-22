@@ -154,7 +154,7 @@ describe('PdfPreview', () => {
     await waitFor(() => expect(pdfMocks.modernGetDocument).toHaveBeenCalledTimes(1))
     const pageInput = screen.getByRole('spinbutton', { name: 'Current PDF page' })
     await waitFor(() => expect(pageInput).toBeEnabled())
-    expect(await screen.findByText('PDF text selectable')).toBeInTheDocument()
+    expect(await screen.findByText('Drag to select PDF text')).toBeInTheDocument()
     expect(ocrMocks.recognizeImage).not.toHaveBeenCalled()
     expect(document.querySelector('iframe')).toBeNull()
 
@@ -175,7 +175,7 @@ describe('PdfPreview', () => {
     })
     render(<PdfPreview data={pdfBlob()} name="scan.pdf" />)
 
-    expect(await screen.findByText('1 OCR lines selectable')).toBeInTheDocument()
+    expect(await screen.findByText('Drag to select · 1 OCR lines')).toBeInTheDocument()
     const line = screen.getByText('中文 OCR text')
     expect(line).toHaveClass('selectable-text-line')
     expect(line.closest('.selectable-text-layer')).toHaveAttribute(

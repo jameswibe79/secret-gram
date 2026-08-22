@@ -86,6 +86,7 @@ export function ImagePreview({ url, name, variant }: ImagePreviewProps) {
           ref={imageRef}
           src={url}
           alt={name}
+          draggable={false}
           onLoad={(event) => void recognize(event.currentTarget)}
         />
         {lines.length > 0 && (
@@ -96,7 +97,7 @@ export function ImagePreview({ url, name, variant }: ImagePreviewProps) {
         <div className={`ocr-preview-status${error ? ' is-error' : ''}`} aria-live="polite">
           {recognizing && <span>{progressLabel(progress)}</span>}
           {!recognizing && recognized && (
-            <span>{lines.length === 0 ? 'No text found' : `${lines.length} selectable text lines ready`}</span>
+            <span>{lines.length === 0 ? 'No text found' : `Drag to select · ${lines.length} text lines`}</span>
           )}
           {!recognizing && error && (
             <>

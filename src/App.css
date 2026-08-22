@@ -1601,11 +1601,24 @@
   -webkit-user-select: text;
 }
 
-.selectable-text-line {
+.selectable-image-surface img {
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.selectable-text-line-box {
   position: absolute;
   display: block;
   overflow: visible;
+}
+
+.selectable-text-line {
+  position: relative;
+  display: inline-block;
+  width: max-content;
+  overflow: visible;
   color: transparent;
+  font-family: Arial, "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
   line-height: 1;
   white-space: pre;
   transform-origin: 0 0;

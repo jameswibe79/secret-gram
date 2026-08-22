@@ -1,7 +1,7 @@
 import * as ort from 'onnxruntime-web/wasm'
 
+import { selectableOcrBox } from '../lib/ocr-selection'
 import type {
-  OcrBox,
   OcrImagePayload,
   OcrLine,
   OcrProgress,
@@ -32,6 +32,10 @@ interface PixelBox {
   top: number
   right: number
   bottom: number
+  textLeft: number
+  textTop: number
+  textRight: number
+  textBottom: number
   score: number
 }
 
@@ -224,6 +228,10 @@ function detectComponents(probabilities: Float32Array, width: number, height: nu
       top: Math.max(0, top - expandY),
       right: Math.min(width - 1, right + expandX),
       bottom: Math.min(height - 1, bottom + expandY),
+      textLeft: left,
+      textTop: top,
+      textRight: right,
+      textBottom: bottom,
       score,
     })
   }
@@ -256,6 +264,10 @@ function mergeLineBoxes(boxes: PixelBox[]): PixelBox[] {
     candidate.top = Math.min(candidate.top, box.top)
     candidate.right = Math.max(candidate.right, box.right)
     candidate.bottom = Math.max(candidate.bottom, box.bottom)
+    candidate.textLeft = Math.min(candidate.textLeft, box.textLeft)
+    candidate.textTop = Math.min(candidate.textTop, box.textTop)
+    candidate.textRight = Math.max(candidate.textRight, box.textRight)
+    candidate.textBottom = Math.max(candidate.textBottom, box.textBottom)
     candidate.score = (candidate.score * firstArea + box.score * secondArea) / (firstArea + secondArea)
   }
   return merged.sort((first, second) => {
@@ -328,14 +340,6 @@ function decodeRecognition(output: ort.Tensor, characters: string[]) {
   }
 }
 
-function normalizedBox(box: PixelBox, width: number, height: number): OcrBox {
-  return {
-    x: box.left / width,
-    y: box.top / height,
-    width: (box.right - box.left + 1) / width,
-    height: (box.bottom - box.top + 1) / height,
-  }
-}
 
 async function recognize(id: number, payload: OcrImagePayload) {
   assertActive(id)
@@ -382,6 +386,10 @@ async function recognize(id: number, payload: OcrImagePayload) {
     top: Math.max(0, Math.round(box.top * scaleY)),
     right: Math.min(image.width - 1, Math.round(box.right * scaleX)),
     bottom: Math.min(image.height - 1, Math.round(box.bottom * scaleY)),
+    textLeft: Math.max(0, Math.round(box.textLeft * scaleX)),
+    textTop: Math.max(0, Math.round(box.textTop * scaleY)),
+    textRight: Math.min(image.width - 1, Math.round(box.textRight * scaleX)),
+    textBottom: Math.min(image.height - 1, Math.round(box.textBottom * scaleY)),
     score: box.score,
   }))
   progress(id, { stage: 'detecting', completed: 1, total: 1 })
@@ -399,7 +407,7 @@ async function recognize(id: number, payload: OcrImagePayload) {
       lines.push({
         text: decoded.text,
         confidence: Math.min(box.score, decoded.confidence || box.score),
-        box: normalizedBox(box, image.width, image.height),
+        box: selectableOcrBox(box, image.width, image.height, decoded.text),
       })
     }
     progress(id, { stage: 'recognizing', completed: index + 1, total: boxes.length })

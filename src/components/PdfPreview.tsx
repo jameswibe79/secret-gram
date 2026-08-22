@@ -451,9 +451,9 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
         </div>
         {ocrStatus !== 'idle' && (
           <div className={`pdf-ocr-status${ocrStatus === 'error' ? ' is-error' : ''}`} aria-live="polite">
-            {ocrStatus === 'native' && <span>PDF text selectable</span>}
+            {ocrStatus === 'native' && <span>Drag to select PDF text</span>}
             {ocrStatus === 'recognizing' && <span>{pdfOcrProgressLabel(ocrProgress)}</span>}
-            {ocrStatus === 'ready' && <span>{ocrLines.length} OCR lines selectable</span>}
+            {ocrStatus === 'ready' && <span>Drag to select · {ocrLines.length} OCR lines</span>}
             {ocrStatus === 'empty' && <span>No selectable text found</span>}
             {ocrStatus === 'error' && (
               <button type="button" onClick={() => setOcrRetryCount((count) => count + 1)}>

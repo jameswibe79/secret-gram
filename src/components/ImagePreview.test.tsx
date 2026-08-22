@@ -49,7 +49,7 @@ describe('ImagePreview', () => {
     render(<ImagePreview url="blob:image" name="scan.png" variant="viewer" />)
     fireEvent.load(loadedImage())
 
-    expect(await screen.findByText('2 selectable text lines ready')).toBeInTheDocument()
+    expect(await screen.findByText('Drag to select · 2 text lines')).toBeInTheDocument()
     expect(screen.getByText('中文识别')).toHaveClass('selectable-text-line')
     expect(screen.getByText('Selectable English')).toHaveClass('selectable-text-line')
     expect(screen.getByLabelText('scan.png recognized selectable text')).toBeInTheDocument()
