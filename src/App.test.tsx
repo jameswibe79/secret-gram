@@ -199,6 +199,10 @@ describe('SecretGram application', () => {
     expect(window.location.hash).toBe('')
     expect(screen.queryByRole('button', { name: 'Copy room ID' })).not.toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Shared text' })).toHaveFocus())
+    const composer = screen.getByRole('textbox', { name: 'Shared text' })
+    const composerRow = composer.closest('.share-input-row')
+    if (!(composerRow instanceof HTMLElement)) throw new Error('Mobile composer row was not rendered')
+    expect(within(composerRow).getByRole('button', { name: 'Share' })).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Invite' }))
     expect(screen.getByText(window.location.pathname)).toBeInTheDocument()
