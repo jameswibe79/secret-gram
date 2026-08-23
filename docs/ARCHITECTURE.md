@@ -164,7 +164,9 @@ R2 and Durable Object SQLite do not provide a cross-service transaction. The flo
 4. record its metadata in SQLite;
 5. remove a newly created object if the SQLite transition is rejected.
 
-A file becomes downloadable only after every chunk is recorded and the declared encrypted total matches. Downloads stream ciphertext from R2 through the Worker. The browser decrypts each chunk and builds a local Blob. Images and PDFs render from that browser-local plaintext. PDF.js supplies the selectable text layer for digital PDFs. Images and scanned PDF pages are rasterized locally and sent only to a dedicated browser Web Worker, where bundled PP-OCRv5 detection and multilingual recognition models run through ONNX Runtime WebAssembly. Recognized text and coordinates remain in active-tab memory, are discarded with the preview or worker, and are never sent to the Worker service, Durable Objects, R2, external viewers, or model providers.
+A file becomes downloadable only after every chunk is recorded and the declared encrypted total matches. Downloads stream ciphertext from R2 through the Worker. The browser decrypts each chunk and builds a local Blob. Images and PDFs render from that browser-local plaintext. PDF.js supplies the selectable text layer for digital PDFs. Images and scanned PDF pages are rasterized locally and sent only to a dedicated browser Web Worker, where bundled PP-OCRv5 detection and multilingual recognition models run through ONNX Runtime WebAssembly. Recognized text and coordinates remain in active-tab memory and are discarded with the preview or worker.
+
+An optional, explicit PDF handoff can transfer the selected decrypted PDF bytes and filename directly to a new `https://heron.tools` tab for browser-side rotation and deskew. The handoff does not pass through SecretGram servers, Durable Objects, or R2, but it deliberately expands the endpoint trust boundary to code served by Heron Tools. The source validates the exact popup window, fixed origin, protocol version, and one-time fragment token before transferring the `ArrayBuffer`.
 
 ## Retention and cleanup
 

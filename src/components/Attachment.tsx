@@ -7,6 +7,7 @@ import {
   type FileTransferCredentials,
 } from '../lib/file-transfer'
 import { ImagePreview } from './ImagePreview'
+import { PdfHandoffButton } from './PdfHandoffButton'
 import { SecurityDialog } from './SecurityDialog'
 import { PdfPreview } from './PdfPreview'
 import { Button } from './ui/button'
@@ -274,6 +275,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
               <Download />
               Download
             </Button>
+            {previewType === 'pdf' && previewBlob && (
+              <PdfHandoffButton data={previewBlob} name={descriptor.name} />
+            )}
             {objectUrl && previewBlob && (
               <Button asChild size="sm">
                 <a href={objectUrl} target="_blank" rel="noopener noreferrer">
@@ -442,6 +446,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                   <Download />
                   Download
                 </Button>
+                {previewType === 'pdf' && (
+                  <PdfHandoffButton data={previewBlob} name={descriptor.name} />
+                )}
                 <Button asChild size="sm">
                   <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                     <ExternalLink />

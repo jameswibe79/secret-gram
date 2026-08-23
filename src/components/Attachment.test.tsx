@@ -196,6 +196,7 @@ describe('Attachment lifecycle', () => {
     expect(screen.getByLabelText('document.pdf PDF thumbnail')).toBeInTheDocument()
     expect(screen.getByText('PDF preview · local reader')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Open in browser / OCR' })).toHaveAttribute('href', 'blob:test')
+    expect(screen.getByRole('button', { name: 'Adjust scan' })).toBeInTheDocument()
   })
 
   it('renders decrypted image thumbnails in resource-list presentation', async () => {

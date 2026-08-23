@@ -1492,6 +1492,31 @@
   gap: 6px;
   align-items: center;
 }
+.attachment-viewer-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pdf-handoff-control {
+  display: inline-grid;
+  gap: 3px;
+  align-items: center;
+}
+
+.pdf-handoff-control small {
+  max-width: 180px;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 8px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pdf-handoff-control small.is-error {
+  color: var(--destructive);
+}
+
 
 .detail-removed-state {
   min-height: 340px;
@@ -2085,6 +2110,49 @@
   border: 1px solid color-mix(in oklch, var(--warning) 24%, transparent);
   border-radius: var(--radius-md);
 }
+.pdf-handoff-warning {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  padding: 13px;
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in oklch, var(--warning) 24%, transparent);
+  border-radius: var(--radius-md);
+}
+
+.pdf-handoff-warning > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.pdf-handoff-warning strong {
+  display: block;
+  margin-bottom: 5px;
+  font-size: 12px;
+}
+
+.pdf-handoff-warning p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.pdf-handoff-warning p + p {
+  margin-top: 7px;
+}
+
+.pdf-handoff-warning code {
+  color: var(--foreground);
+}
+
+.pdf-handoff-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 
 .recall-dialog > p {
   margin: 0;

@@ -21,7 +21,7 @@ SecretGram is a deployable reference implementation, not an independently audite
 - Real-time WebSocket delivery with one-time tickets, history catch-up, reconnects, and HTTP fallback
 - Client-side chunked encryption for images, PDFs, and arbitrary files
 - Idempotent encrypted chunk retries with ciphertext digest conflict detection
-- Browser-local image previews and native browser PDF viewing from decrypted Blob URLs
+- Browser-local PDF.js previews, selectable PDF/image OCR text, and an explicit confirmed handoff to Heron Tools for scanned-PDF rotation and deskew
 - Durable Object SQLite for room ordering and state; R2 for encrypted file chunks
 - Logical expiration on read paths plus alarm-driven physical cleanup
 - Layered per-source, per-device, and room-wide rate limits and storage quotas
