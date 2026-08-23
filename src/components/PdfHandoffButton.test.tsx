@@ -1,9 +1,15 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { handoffPdfToHeron } from '../lib/pdf-handoff'
 import { PdfHandoffButton } from './PdfHandoffButton'
+const toastMocks = vi.hoisted(() => ({
+  success: vi.fn(),
+  error: vi.fn(),
+}))
+
+vi.mock('sonner', () => ({ toast: toastMocks }))
 
 vi.mock('../lib/pdf-handoff', () => ({
   handoffPdfToHeron: vi.fn(),
@@ -11,6 +17,8 @@ vi.mock('../lib/pdf-handoff', () => ({
 
 describe('PdfHandoffButton', () => {
   beforeEach(() => {
+    toastMocks.success.mockReset()
+    toastMocks.error.mockReset()
     vi.mocked(handoffPdfToHeron).mockReset()
     vi.mocked(handoffPdfToHeron).mockResolvedValue()
   })
@@ -33,6 +41,19 @@ describe('PdfHandoffButton', () => {
       name: 'crooked-scan.pdf',
       signal: expect.any(AbortSignal),
     })
-    expect(await screen.findByText('Sent to Heron Tools')).toBeInTheDocument()
+    await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('PDF sent to Heron Tools'))
+  })
+
+  it('keeps the toolbar button footprint stable while the handoff is pending', async () => {
+    const user = userEvent.setup()
+    vi.mocked(handoffPdfToHeron).mockReturnValue(new Promise<void>(() => undefined))
+    render(<PdfHandoffButton data={new Blob(['pdf'])} name="scan.pdf" />)
+
+    await user.click(screen.getByRole('button', { name: 'Adjust scan' }))
+    await user.click(screen.getByRole('button', { name: 'Send to Heron Tools' }))
+
+    expect(screen.getByRole('button', { name: 'Adjust scan' })).toBeDisabled()
+    expect(screen.queryByText('Sending PDF…')).not.toBeInTheDocument()
+    expect(document.querySelector('.pdf-handoff-control')).toBeNull()
   })
 })

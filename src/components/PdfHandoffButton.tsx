@@ -1,5 +1,6 @@
 import { ExternalLink, LoaderCircle, ScanLine, ShieldAlert } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
+import { toast } from 'sonner'
 
 import { handoffPdfToHeron } from '../lib/pdf-handoff'
 import { SecurityDialog } from './SecurityDialog'
@@ -14,8 +15,6 @@ export function PdfHandoffButton({ data, name }: PdfHandoffButtonProps) {
   const abortRef = useRef<AbortController | null>(null)
   const [confirming, setConfirming] = useState(false)
   const [sending, setSending] = useState(false)
-  const [status, setStatus] = useState('')
-  const [error, setError] = useState('')
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -26,13 +25,11 @@ export function PdfHandoffButton({ data, name }: PdfHandoffButtonProps) {
     const operation = handoffPdfToHeron({ data, name, signal: controller.signal })
     setConfirming(false)
     setSending(true)
-    setStatus('')
-    setError('')
     void operation.then(() => {
-      if (!controller.signal.aborted) setStatus('Sent to Heron Tools')
+      if (!controller.signal.aborted) toast.success('PDF sent to Heron Tools')
     }).catch((handoffError: unknown) => {
       if (controller.signal.aborted) return
-      setError(
+      toast.error(
         handoffError instanceof Error
           ? handoffError.message
           : 'The decrypted PDF could not be sent to Heron Tools.',
@@ -45,23 +42,16 @@ export function PdfHandoffButton({ data, name }: PdfHandoffButtonProps) {
 
   return (
     <>
-      <span className="pdf-handoff-control">
-        <Button
-          variant="outline"
-          size="sm"
-          type="button"
-          disabled={sending}
-          onClick={() => setConfirming(true)}
-        >
-          {sending ? <LoaderCircle className="spinning" /> : <ScanLine />}
-          {sending ? 'Sending PDF…' : 'Adjust scan'}
-        </Button>
-        {(status || error) && (
-          <small className={error ? 'is-error' : ''} role={error ? 'alert' : 'status'}>
-            {error || status}
-          </small>
-        )}
-      </span>
+      <Button
+        variant="outline"
+        size="sm"
+        type="button"
+        disabled={sending}
+        onClick={() => setConfirming(true)}
+      >
+        {sending ? <LoaderCircle className="spinning" /> : <ScanLine />}
+        Adjust scan
+      </Button>
 
       {confirming && (
         <SecurityDialog title="Adjust scanned PDF in Heron Tools" onClose={() => setConfirming(false)}>

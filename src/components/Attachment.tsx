@@ -282,7 +282,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
               <Button asChild size="sm">
                 <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink />
-                  {previewType === 'pdf' ? 'Open in browser / OCR' : 'Open separately'}
+                  {previewType === 'pdf' ? 'Open in browser' : 'Open separately'}
                 </a>
               </Button>
             )}
@@ -452,7 +452,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 <Button asChild size="sm">
                   <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                     <ExternalLink />
-                    {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser / OCR' : 'Open in new tab'}
+                    {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser' : 'Open in new tab'}
                   </a>
                 </Button>
               </div>

@@ -482,7 +482,7 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
         {error && (
           <div className="pdf-document-status is-error" role="alert">
             <span>{error}</span>
-            <small>Use Open in browser / OCR or Download above, or retry the compatible renderer.</small>
+            <small>Use Open in browser or Download above, or retry the compatible renderer.</small>
             <Button type="button" size="sm" onClick={retryCompatibilityPreview}>
               <RotateCcw />
               Retry compatible preview

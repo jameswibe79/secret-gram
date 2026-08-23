@@ -1497,27 +1497,6 @@
   justify-content: flex-end;
 }
 
-.pdf-handoff-control {
-  display: inline-grid;
-  gap: 3px;
-  align-items: center;
-}
-
-.pdf-handoff-control small {
-  max-width: 180px;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 8px;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pdf-handoff-control small.is-error {
-  color: var(--destructive);
-}
-
-
 .detail-removed-state {
   min-height: 340px;
   padding: 36px;
