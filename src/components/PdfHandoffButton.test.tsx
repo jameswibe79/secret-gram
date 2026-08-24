@@ -26,7 +26,7 @@ describe('PdfHandoffButton', () => {
   it('requires explicit confirmation before handing decrypted PDF bytes to Heron Tools', async () => {
     const user = userEvent.setup()
     const data = new Blob(['pdf'], { type: 'application/pdf' })
-    render(<PdfHandoffButton data={data} name="crooked-scan.pdf" />)
+    render(<PdfHandoffButton data={data} name="crooked-scan.pdf" tool="deskew" />)
 
     await user.click(screen.getByRole('button', { name: 'Adjust scan' }))
     expect(screen.getByRole('dialog', { name: 'Adjust scanned PDF in Heron Tools' })).toBeInTheDocument()
@@ -39,15 +39,34 @@ describe('PdfHandoffButton', () => {
     expect(handoffPdfToHeron).toHaveBeenCalledWith({
       data,
       name: 'crooked-scan.pdf',
+      tool: 'deskew',
       signal: expect.any(AbortSignal),
     })
     await waitFor(() => expect(toastMocks.success).toHaveBeenCalledWith('PDF sent to Heron Tools'))
   })
 
+
+  it('opens the dedicated PDF Workspace destination after confirmation', async () => {
+    const user = userEvent.setup()
+    const data = new Blob(['pdf'], { type: 'application/pdf' })
+    render(<PdfHandoffButton data={data} name="pages.pdf" tool="workspace" />)
+
+    await user.click(screen.getByRole('button', { name: 'PDF workspace' }))
+    expect(screen.getByRole('dialog', { name: 'Open PDF Workspace in Heron Tools' })).toBeInTheDocument()
+    expect(screen.getByText(/arrange, rotate, delete, and export pages/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Send to Heron Tools' }))
+
+    expect(handoffPdfToHeron).toHaveBeenCalledWith({
+      data,
+      name: 'pages.pdf',
+      tool: 'workspace',
+      signal: expect.any(AbortSignal),
+    })
+  })
   it('keeps the toolbar button footprint stable while the handoff is pending', async () => {
     const user = userEvent.setup()
     vi.mocked(handoffPdfToHeron).mockReturnValue(new Promise<void>(() => undefined))
-    render(<PdfHandoffButton data={new Blob(['pdf'])} name="scan.pdf" />)
+    render(<PdfHandoffButton data={new Blob(['pdf'])} name="scan.pdf" tool="deskew" />)
 
     await user.click(screen.getByRole('button', { name: 'Adjust scan' }))
     await user.click(screen.getByRole('button', { name: 'Send to Heron Tools' }))

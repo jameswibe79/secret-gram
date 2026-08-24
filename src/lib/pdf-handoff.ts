@@ -1,5 +1,10 @@
 const HERON_ORIGIN = 'https://heron.tools'
-const HERON_PDF_PATH = '/tools/pdf-rotate-pages/'
+export type HeronPdfTool = 'deskew' | 'workspace'
+
+const HERON_PDF_PATH_BY_TOOL: Record<HeronPdfTool, string> = {
+  deskew: '/tools/pdf-rotate-pages/',
+  workspace: '/tools/pdf-workspace/',
+}
 const PDF_HANDOFF_VERSION = 1
 const PDF_HANDOFF_READY_TYPE = 'heron.tools:pdf-handoff:ready'
 const PDF_HANDOFF_FILE_TYPE = 'heron.tools:pdf-handoff:file'
@@ -8,6 +13,7 @@ const PDF_HANDOFF_TIMEOUT_MS = 30_000
 interface PdfHandoffOptions {
   data: Blob
   name: string
+  tool: HeronPdfTool
   signal?: AbortSignal
 }
 
@@ -20,11 +26,11 @@ function isReadyMessage(value: unknown, expectedToken: string): boolean {
   )
 }
 
-export function handoffPdfToHeron({ data, name, signal }: PdfHandoffOptions): Promise<void> {
+export function handoffPdfToHeron({ data, name, tool, signal }: PdfHandoffOptions): Promise<void> {
   if (signal?.aborted) return Promise.reject(new DOMException('PDF handoff canceled', 'AbortError'))
 
   const token = crypto.randomUUID()
-  const destination = new URL(HERON_PDF_PATH, HERON_ORIGIN)
+  const destination = new URL(HERON_PDF_PATH_BY_TOOL[tool], HERON_ORIGIN)
   destination.searchParams.set('handoff', 'pdf')
   destination.hash = new URLSearchParams({ token }).toString()
   const editor = window.open(destination.toString(), '_blank')

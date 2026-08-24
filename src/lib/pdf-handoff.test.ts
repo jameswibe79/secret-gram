@@ -19,7 +19,7 @@ describe('handoffPdfToHeron', () => {
     const postMessage = vi.fn()
     const editor = { closed: false, postMessage } as unknown as Window
     const open = vi.spyOn(window, 'open').mockReturnValue(editor)
-    const operation = handoffPdfToHeron({ data: pdfBlob(), name: 'scan.pdf' })
+    const operation = handoffPdfToHeron({ data: pdfBlob(), name: 'scan.pdf', tool: 'deskew' })
 
     const destination = new URL(String(open.mock.calls[0][0]))
     const token = new URLSearchParams(destination.hash.slice(1)).get('token')
@@ -56,10 +56,26 @@ describe('handoffPdfToHeron', () => {
     expect(transfer).toEqual([message.bytes])
   })
 
+
+  it('opens PDF Workspace with the same protected handoff protocol', async () => {
+    const editor = { closed: false, postMessage: vi.fn() } as unknown as Window
+    const open = vi.spyOn(window, 'open').mockReturnValue(editor)
+    const controller = new AbortController()
+    const operation = handoffPdfToHeron({
+      data: pdfBlob(),
+      name: 'workspace.pdf',
+      tool: 'workspace',
+      signal: controller.signal,
+    })
+
+    expect(new URL(String(open.mock.calls[0][0])).pathname).toBe('/tools/pdf-workspace/')
+    controller.abort()
+    await expect(operation).rejects.toMatchObject({ name: 'AbortError' })
+  })
   it('fails clearly when the browser blocks the editor window', async () => {
     vi.spyOn(window, 'open').mockReturnValue(null)
 
-    await expect(handoffPdfToHeron({ data: pdfBlob(), name: 'scan.pdf' })).rejects.toThrow(
+    await expect(handoffPdfToHeron({ data: pdfBlob(), name: 'scan.pdf', tool: 'deskew' })).rejects.toThrow(
       'The browser blocked the Heron Tools window.',
     )
   })
@@ -71,6 +87,7 @@ describe('handoffPdfToHeron', () => {
     const operation = handoffPdfToHeron({
       data: pdfBlob(),
       name: 'scan.pdf',
+      tool: 'deskew',
       signal: controller.signal,
     })
 

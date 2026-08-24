@@ -276,7 +276,10 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
               Download
             </Button>
             {previewType === 'pdf' && previewBlob && (
-              <PdfHandoffButton data={previewBlob} name={descriptor.name} />
+              <>
+                <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="deskew" />
+                <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="workspace" />
+              </>
             )}
             {objectUrl && previewBlob && (
               <Button asChild size="sm">
@@ -447,7 +450,10 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                   Download
                 </Button>
                 {previewType === 'pdf' && (
-                  <PdfHandoffButton data={previewBlob} name={descriptor.name} />
+                  <>
+                    <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="deskew" />
+                    <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="workspace" />
+                  </>
                 )}
                 <Button asChild size="sm">
                   <a href={objectUrl} target="_blank" rel="noopener noreferrer">
