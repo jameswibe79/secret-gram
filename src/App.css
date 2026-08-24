@@ -2288,7 +2288,7 @@
   bottom: 12px;
   left: 12px;
   display: grid;
-  grid-template-columns: auto minmax(80px, 1fr) auto auto auto;
+  grid-template-columns: auto minmax(80px, 1fr) auto auto auto auto auto;
   gap: 8px;
   align-items: center;
   min-height: 44px;
@@ -2299,6 +2299,22 @@
   border-radius: var(--radius-lg);
   box-shadow: 0 10px 30px rgb(0 0 0 / 28%);
   backdrop-filter: blur(14px);
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 160ms ease;
+}
+
+.video-controls.is-hidden {
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(10px);
+  visibility: hidden;
+}
+
+.video-controls.is-pinned {
+  border-color: color-mix(in oklch, var(--primary) 56%, white 12%);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 28%), 0 0 0 1px color-mix(in oklch, var(--primary) 30%, transparent);
 }
 
 .video-control-button {
@@ -2308,6 +2324,31 @@
 .video-control-button:hover {
   color: white;
   background: rgb(255 255 255 / 14%);
+}
+
+.video-control-button[aria-pressed="true"] {
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.video-show-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  color: white;
+  background: rgb(8 12 20 / 82%);
+  border: 1px solid rgb(255 255 255 / 13%);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 26%);
+  backdrop-filter: blur(12px);
+}
+
+.video-show-controls:hover {
+  color: white;
+  background: rgb(255 255 255 / 18%);
+}
+
+.video-preview.controls-hidden video {
+  cursor: none;
 }
 
 .video-timeline {
@@ -2346,6 +2387,13 @@
   max-height: none;
   border: 0;
   border-radius: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .video-center-play,
+  .video-controls {
+    transition: none;
+  }
 }
 
 .modal-text-preview pre {
@@ -2965,7 +3013,7 @@
     right: 6px;
     bottom: 6px;
     left: 6px;
-    grid-template-columns: auto minmax(48px, 1fr) auto auto;
+    grid-template-columns: auto minmax(48px, 1fr) auto auto auto auto;
     gap: 4px;
     min-height: 40px;
     padding: 4px 5px;
@@ -2978,6 +3026,11 @@
   .video-center-play {
     width: 50px;
     height: 50px;
+  }
+
+  .video-show-controls {
+    right: 6px;
+    bottom: 6px;
   }
 
 }

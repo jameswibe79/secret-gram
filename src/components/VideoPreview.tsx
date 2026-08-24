@@ -1,4 +1,4 @@
-import { Maximize, Minimize, Pause, Play, Volume2, VolumeX } from 'lucide-react'
+import { Eye, EyeOff, Maximize, Minimize, Pause, Pin, PinOff, Play, Volume2, VolumeX } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { Button } from './ui/button'
@@ -17,26 +17,65 @@ function formatTime(seconds: number): string {
   return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`
 }
 
+const AUTO_HIDE_DELAY_MS = 2_500
+
 export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
+  const hideTimerRef = useRef<number | null>(null)
   const [playing, setPlaying] = useState(false)
   const [muted, setMuted] = useState(false)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [fullscreen, setFullscreen] = useState(false)
+  const [controlsVisible, setControlsVisible] = useState(true)
+  const [controlsPinned, setControlsPinned] = useState(false)
   const [error, setError] = useState('')
+
+  const clearHideTimer = useCallback(() => {
+    if (hideTimerRef.current === null) return
+    window.clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = null
+  }, [])
+
+  const scheduleAutoHide = useCallback(() => {
+    clearHideTimer()
+    if (!playing || controlsPinned) return
+    hideTimerRef.current = window.setTimeout(() => {
+      hideTimerRef.current = null
+      if (containerRef.current?.contains(document.activeElement)) return
+      setControlsVisible(false)
+    }, AUTO_HIDE_DELAY_MS)
+  }, [clearHideTimer, controlsPinned, playing])
+
+  const revealControls = useCallback(() => {
+    setControlsVisible(true)
+    scheduleAutoHide()
+  }, [scheduleAutoHide])
 
   useEffect(() => {
     const video = videoRef.current
     setPlaying(false)
     setDuration(0)
     setCurrentTime(0)
+    setControlsVisible(true)
+    setControlsPinned(false)
     setError('')
     return () => {
+      clearHideTimer()
       if (video && !video.paused) video.pause()
     }
-  }, [url])
+  }, [clearHideTimer, url])
+
+  useEffect(() => {
+    clearHideTimer()
+    if (!playing || controlsPinned) {
+      setControlsVisible(true)
+      return
+    }
+    scheduleAutoHide()
+    return clearHideTimer
+  }, [clearHideTimer, controlsPinned, playing, scheduleAutoHide])
 
   useEffect(() => {
     function syncFullscreen() {
@@ -57,6 +96,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
       await video.play()
     } catch {
       setError('Playback could not start in this browser.')
+      setControlsVisible(true)
     }
   }, [])
 
@@ -65,6 +105,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
     if (!video) return
     video.currentTime = nextTime
     setCurrentTime(nextTime)
+    revealControls()
   }
 
   function toggleMute() {
@@ -72,6 +113,25 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
     if (!video) return
     video.muted = !video.muted
     setMuted(video.muted)
+    revealControls()
+  }
+
+  function toggleControlsPin() {
+    setControlsVisible(true)
+    setControlsPinned((current) => !current)
+  }
+
+  function hideControls() {
+    clearHideTimer()
+    setControlsVisible(false)
+  }
+
+  function handleVideoClick() {
+    if (!controlsVisible) {
+      revealControls()
+      return
+    }
+    void togglePlayback()
   }
 
   async function toggleFullscreen() {
@@ -85,13 +145,21 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
       await container.requestFullscreen()
     } catch {
       setError('Full screen is unavailable in this browser.')
+      setControlsVisible(true)
     }
   }
 
   return (
     <div
       ref={containerRef}
-      className={`video-preview ${variant === 'viewer' ? 'viewer-video-preview' : 'modal-video-preview'}`}
+      className={`video-preview ${variant === 'viewer' ? 'viewer-video-preview' : 'modal-video-preview'}${controlsVisible ? '' : ' controls-hidden'}`}
+      onPointerMove={revealControls}
+      onPointerLeave={scheduleAutoHide}
+      onFocusCapture={revealControls}
+      onBlurCapture={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget)) return
+        scheduleAutoHide()
+      }}
     >
       <video
         ref={videoRef}
@@ -100,10 +168,14 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
         preload="metadata"
         tabIndex={0}
         aria-label={`${name} video preview`}
-        onClick={togglePlayback}
+        onClick={handleVideoClick}
         onKeyDown={(event) => {
           if (event.key !== ' ' && event.key !== 'Enter') return
           event.preventDefault()
+          if (!controlsVisible) {
+            revealControls()
+            return
+          }
           void togglePlayback()
         }}
         onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
@@ -113,7 +185,10 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
         onPause={() => setPlaying(false)}
         onEnded={() => setPlaying(false)}
         onVolumeChange={(event) => setMuted(event.currentTarget.muted)}
-        onError={() => setError('This MP4 could not be played by this browser.')}
+        onError={() => {
+          setError('This MP4 could not be played by this browser.')
+          setControlsVisible(true)
+        }}
       />
 
       {!playing && !error && (
@@ -121,20 +196,27 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
           type="button"
           className="video-center-play"
           aria-label={`Play ${name}`}
-          onClick={togglePlayback}
+          onClick={() => void togglePlayback()}
         >
           <Play aria-hidden="true" />
         </button>
       )}
 
-      <div className="video-controls" aria-label={`${name} playback controls`}>
+      <div
+        className={`video-controls${controlsVisible ? '' : ' is-hidden'}${controlsPinned ? ' is-pinned' : ''}`}
+        aria-label={`${name} playback controls`}
+        aria-hidden={!controlsVisible}
+        onPointerEnter={clearHideTimer}
+        onPointerLeave={scheduleAutoHide}
+      >
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
           className="video-control-button"
           aria-label={playing ? 'Pause video' : 'Play video'}
-          onClick={togglePlayback}
+          title={playing ? 'Pause' : 'Play'}
+          onClick={() => void togglePlayback()}
         >
           {playing ? <Pause /> : <Play />}
         </Button>
@@ -157,6 +239,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
           size="icon-sm"
           className="video-control-button"
           aria-label={muted ? 'Unmute video' : 'Mute video'}
+          title={muted ? 'Unmute' : 'Mute'}
           aria-pressed={muted}
           onClick={toggleMute}
         >
@@ -167,12 +250,50 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
           variant="ghost"
           size="icon-sm"
           className="video-control-button"
+          aria-label={controlsPinned ? 'Use auto-hide controls' : 'Pin controls'}
+          title={controlsPinned ? 'Use auto-hide' : 'Pin controls'}
+          aria-pressed={controlsPinned}
+          onClick={toggleControlsPin}
+        >
+          {controlsPinned ? <PinOff /> : <Pin />}
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="video-control-button"
+          aria-label="Hide video controls"
+          title="Hide controls"
+          onClick={hideControls}
+        >
+          <EyeOff />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="video-control-button"
           aria-label={fullscreen ? 'Exit full screen' : 'Enter full screen'}
+          title={fullscreen ? 'Exit full screen' : 'Enter full screen'}
           onClick={() => void toggleFullscreen()}
         >
           {fullscreen ? <Minimize /> : <Maximize />}
         </Button>
       </div>
+
+      {!controlsVisible && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="video-show-controls"
+          aria-label="Show video controls"
+          title="Show controls"
+          onClick={revealControls}
+        >
+          <Eye />
+        </Button>
+      )}
 
       {error && <p className="video-error" role="alert">{error}</p>}
     </div>

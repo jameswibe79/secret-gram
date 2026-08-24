@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -22,6 +22,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.clearAllTimers()
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -52,6 +54,33 @@ describe('VideoPreview', () => {
 
     await user.click(screen.getByRole('button', { name: 'Enter full screen' }))
     expect(requestFullscreen).toHaveBeenCalledOnce()
+  })
+
+  it('auto-hides during playback and supports pinning and manual visibility', () => {
+    vi.useFakeTimers()
+    render(<VideoPreview url="blob:video" name="recording.mp4" variant="viewer" />)
+    const video = screen.getByLabelText('recording.mp4 video preview')
+    const controls = screen.getByLabelText('recording.mp4 playback controls')
+
+    fireEvent.play(video)
+    act(() => vi.advanceTimersByTime(2_500))
+    expect(controls).toHaveAttribute('aria-hidden', 'true')
+    expect(screen.getByRole('button', { name: 'Show video controls' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show video controls' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Pin controls' }))
+    act(() => vi.advanceTimersByTime(5_000))
+    expect(controls).toHaveAttribute('aria-hidden', 'false')
+    expect(screen.getByRole('button', { name: 'Use auto-hide controls' })).toHaveAttribute('aria-pressed', 'true')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Hide video controls' }))
+    expect(controls).toHaveAttribute('aria-hidden', 'true')
+    fireEvent.click(screen.getByRole('button', { name: 'Show video controls' }))
+    expect(controls).toHaveAttribute('aria-hidden', 'false')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use auto-hide controls' }))
+    act(() => vi.advanceTimersByTime(2_500))
+    expect(controls).toHaveAttribute('aria-hidden', 'true')
   })
 
   it('shows a fail-safe message when the browser rejects the video', () => {
