@@ -30,6 +30,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
   const [fullscreen, setFullscreen] = useState(false)
   const [controlsVisible, setControlsVisible] = useState(true)
   const [controlsPinned, setControlsPinned] = useState(false)
+  const [controlsManuallyHidden, setControlsManuallyHidden] = useState(false)
   const [error, setError] = useState('')
 
   const clearHideTimer = useCallback(() => {
@@ -40,18 +41,19 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
 
   const scheduleAutoHide = useCallback(() => {
     clearHideTimer()
-    if (!playing || controlsPinned) return
+    if (!playing || controlsPinned || controlsManuallyHidden) return
     hideTimerRef.current = window.setTimeout(() => {
       hideTimerRef.current = null
       if (containerRef.current?.contains(document.activeElement)) return
       setControlsVisible(false)
     }, AUTO_HIDE_DELAY_MS)
-  }, [clearHideTimer, controlsPinned, playing])
+  }, [clearHideTimer, controlsManuallyHidden, controlsPinned, playing])
 
   const revealControls = useCallback(() => {
+    if (controlsManuallyHidden) return
     setControlsVisible(true)
     scheduleAutoHide()
-  }, [scheduleAutoHide])
+  }, [controlsManuallyHidden, scheduleAutoHide])
 
   useEffect(() => {
     const video = videoRef.current
@@ -60,6 +62,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
     setCurrentTime(0)
     setControlsVisible(true)
     setControlsPinned(false)
+    setControlsManuallyHidden(false)
     setError('')
     return () => {
       clearHideTimer()
@@ -69,13 +72,17 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
 
   useEffect(() => {
     clearHideTimer()
+    if (controlsManuallyHidden) {
+      setControlsVisible(false)
+      return
+    }
     if (!playing || controlsPinned) {
       setControlsVisible(true)
       return
     }
     scheduleAutoHide()
     return clearHideTimer
-  }, [clearHideTimer, controlsPinned, playing, scheduleAutoHide])
+  }, [clearHideTimer, controlsManuallyHidden, controlsPinned, playing, scheduleAutoHide])
 
   useEffect(() => {
     function syncFullscreen() {
@@ -96,6 +103,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
       await video.play()
     } catch {
       setError('Playback could not start in this browser.')
+      setControlsManuallyHidden(false)
       setControlsVisible(true)
     }
   }, [])
@@ -123,11 +131,17 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
 
   function hideControls() {
     clearHideTimer()
+    setControlsManuallyHidden(true)
     setControlsVisible(false)
   }
 
+  function showControls() {
+    setControlsManuallyHidden(false)
+    setControlsVisible(true)
+  }
+
   function handleVideoClick() {
-    if (!controlsVisible) {
+    if (!controlsVisible && !controlsManuallyHidden) {
       revealControls()
       return
     }
@@ -172,7 +186,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
         onKeyDown={(event) => {
           if (event.key !== ' ' && event.key !== 'Enter') return
           event.preventDefault()
-          if (!controlsVisible) {
+          if (!controlsVisible && !controlsManuallyHidden) {
             revealControls()
             return
           }
@@ -187,6 +201,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
         onVolumeChange={(event) => setMuted(event.currentTarget.muted)}
         onError={() => {
           setError('This MP4 could not be played by this browser.')
+          setControlsManuallyHidden(false)
           setControlsVisible(true)
         }}
       />
@@ -289,7 +304,7 @@ export function VideoPreview({ url, name, variant }: VideoPreviewProps) {
           className="video-show-controls"
           aria-label="Show video controls"
           title="Show controls"
-          onClick={revealControls}
+          onClick={showControls}
         >
           <Eye />
         </Button>
