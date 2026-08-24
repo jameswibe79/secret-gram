@@ -200,6 +200,33 @@ describe('Attachment lifecycle', () => {
     expect(screen.getByRole('button', { name: 'PDF workspace' })).toBeInTheDocument()
   })
 
+  it('shows MP4 thumbnails and browser-local playback controls', async () => {
+    vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['video'], { type: 'video/mp4' }))
+    const user = userEvent.setup()
+    const mp4Descriptor = {
+      ...descriptor,
+      name: 'recording.mp4',
+      mimeType: 'video/mp4',
+    }
+    const rendered = render(<Attachment descriptor={mp4Descriptor} credentials={credentials} />)
+
+    await waitFor(() => {
+      expect(document.querySelector('.preview-thumb video')).toHaveAttribute('src', 'blob:test')
+    })
+    expect(document.querySelector('.preview-thumb video')).toHaveAttribute('preload', 'metadata')
+    await user.click(screen.getByRole('button', { name: 'Open recording.mp4 preview' }))
+
+    expect(screen.getByText('MP4 video preview')).toBeInTheDocument()
+    expect(screen.getByLabelText('recording.mp4 video preview')).toHaveAttribute('controls')
+    expect(screen.getByLabelText('recording.mp4 video preview')).toHaveAttribute('playsinline')
+    rendered.unmount()
+
+    render(
+      <Attachment descriptor={mp4Descriptor} credentials={credentials} presentation="viewer" />,
+    )
+    expect(await screen.findByLabelText('recording.mp4 video preview')).toHaveAttribute('controls')
+  })
+
   it('renders decrypted image thumbnails in resource-list presentation', async () => {
     vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['image'], { type: 'image/png' }))
 

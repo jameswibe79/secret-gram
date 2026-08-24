@@ -75,13 +75,20 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
     if (descriptor.size > PREVIEW_LIMIT_BYTES) return 'none'
     if (SAFE_IMAGE_TYPES[descriptor.mimeType] === true) return 'image'
     if (descriptor.mimeType === 'application/pdf') return 'pdf'
+    if (descriptor.mimeType === 'video/mp4') return 'video'
     return 'none'
   }, [descriptor.mimeType, descriptor.size])
   const autoPreviewLimit = previewType === 'text'
     ? AUTO_TEXT_PREVIEW_LIMIT_BYTES
     : AUTO_PREVIEW_LIMIT_BYTES
   const autoPreviewEnabled = previewType !== 'none' && descriptor.size <= autoPreviewLimit
-  const previewGlyph = previewType === 'image' ? 'IMG' : previewType === 'pdf' ? 'PDF' : 'TXT'
+  const previewGlyph = previewType === 'image'
+    ? 'IMG'
+    : previewType === 'pdf'
+      ? 'PDF'
+      : previewType === 'video'
+        ? 'MP4'
+        : 'TXT'
 
   useEffect(() => {
     mountedRef.current = true
@@ -252,6 +259,8 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           <img src={objectUrl} alt="" />
         ) : previewType === 'pdf' && objectUrl && previewBlob ? (
           <PdfPreview data={previewBlob} name={descriptor.name} compact />
+        ) : previewType === 'video' && objectUrl ? (
+          <video src={objectUrl} muted playsInline preload="metadata" />
         ) : (
           <span>{loading ? '…' : previewGlyph}</span>
         )}
@@ -342,6 +351,16 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
             <PdfPreview data={previewBlob} name={descriptor.name} />
           )}
+          {!loading && previewType === 'video' && objectUrl && previewBlob && (
+            <video
+              className="viewer-video-preview"
+              src={objectUrl}
+              controls
+              playsInline
+              preload="metadata"
+              aria-label={`${descriptor.name} video preview`}
+            />
+          )}
           {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
             <div className="viewer-text-preview">
               <pre tabIndex={0} dir="auto" aria-label={`${descriptor.name} text content`}>
@@ -371,6 +390,8 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 <img src={objectUrl} alt="" />
               ) : previewType === 'pdf' && objectUrl && previewBlob ? (
                 <PdfPreview data={previewBlob} name={descriptor.name} compact />
+              ) : previewType === 'video' && objectUrl ? (
+                <video src={objectUrl} muted playsInline preload="metadata" />
               ) : previewType === 'text' && previewText !== null ? (
                 <span className="text-preview-snippet" dir="auto">
                   {previewText === '' ? 'Empty text file' : previewText.slice(0, INLINE_TEXT_CHARACTERS)}
@@ -439,7 +460,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                   ? 'Image preview'
                   : previewType === 'pdf'
                     ? 'PDF preview · local reader'
-                    : 'Plain-text preview'}
+                    : previewType === 'video'
+                      ? 'MP4 video preview'
+                      : 'Plain-text preview'}
               </strong>
               <span>{fileSize(descriptor.size)} · decrypted only in this browser</span>
             </div>
@@ -492,6 +515,16 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           )}
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
             <PdfPreview data={previewBlob} name={descriptor.name} />
+          )}
+          {!loading && previewType === 'video' && objectUrl && previewBlob && (
+            <video
+              className="modal-video-preview"
+              src={objectUrl}
+              controls
+              playsInline
+              preload="metadata"
+              aria-label={`${descriptor.name} video preview`}
+            />
           )}
           {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
             <div className="modal-text-preview">
