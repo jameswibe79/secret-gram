@@ -25,6 +25,14 @@ vi.mock('./ImagePreview', () => ({
     </div>
   ),
 }))
+vi.mock('./VideoPreview', () => ({
+  VideoPreview: ({ name, variant }: { name: string; variant: string }) => (
+    <div aria-label={`${name} custom video preview`} data-variant={variant}>
+      Styled video controls
+    </div>
+  ),
+}))
+
 
 const descriptor: FileDescriptor = {
   fileId: '00000000-0000-4000-8000-000000000001',
@@ -217,14 +225,13 @@ describe('Attachment lifecycle', () => {
     await user.click(screen.getByRole('button', { name: 'Open recording.mp4 preview' }))
 
     expect(screen.getByText('MP4 video preview')).toBeInTheDocument()
-    expect(screen.getByLabelText('recording.mp4 video preview')).toHaveAttribute('controls')
-    expect(screen.getByLabelText('recording.mp4 video preview')).toHaveAttribute('playsinline')
+    expect(screen.getByLabelText('recording.mp4 custom video preview')).toHaveAttribute('data-variant', 'modal')
     rendered.unmount()
 
     render(
       <Attachment descriptor={mp4Descriptor} credentials={credentials} presentation="viewer" />,
     )
-    expect(await screen.findByLabelText('recording.mp4 video preview')).toHaveAttribute('controls')
+    expect(await screen.findByLabelText('recording.mp4 custom video preview')).toHaveAttribute('data-variant', 'viewer')
   })
 
   it('renders decrypted image thumbnails in resource-list presentation', async () => {

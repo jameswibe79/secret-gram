@@ -10,6 +10,7 @@ import { ImagePreview } from './ImagePreview'
 import { PdfHandoffButton } from './PdfHandoffButton'
 import { SecurityDialog } from './SecurityDialog'
 import { PdfPreview } from './PdfPreview'
+import { VideoPreview } from './VideoPreview'
 import { Button } from './ui/button'
 
 interface AttachmentProps {
@@ -352,14 +353,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             <PdfPreview data={previewBlob} name={descriptor.name} />
           )}
           {!loading && previewType === 'video' && objectUrl && previewBlob && (
-            <video
-              className="viewer-video-preview"
-              src={objectUrl}
-              controls
-              playsInline
-              preload="metadata"
-              aria-label={`${descriptor.name} video preview`}
-            />
+            <VideoPreview url={objectUrl} name={descriptor.name} variant="viewer" />
           )}
           {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
             <div className="viewer-text-preview">
@@ -517,14 +511,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             <PdfPreview data={previewBlob} name={descriptor.name} />
           )}
           {!loading && previewType === 'video' && objectUrl && previewBlob && (
-            <video
-              className="modal-video-preview"
-              src={objectUrl}
-              controls
-              playsInline
-              preload="metadata"
-              aria-label={`${descriptor.name} video preview`}
-            />
+            <VideoPreview url={objectUrl} name={descriptor.name} variant="modal" />
           )}
           {!loading && previewType === 'text' && objectUrl && previewBlob && previewText !== null && (
             <div className="modal-text-preview">
