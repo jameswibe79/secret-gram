@@ -177,7 +177,7 @@ Never log room codes, fragments, bearer tokens, tickets, request bodies, ciphert
 4. Run `npx wrangler deploy --dry-run` and inspect bindings.
 5. Deploy through the approved production identity.
 6. Record Worker version and build inputs.
-7. Verify health, headers, two-browser text, pin/replace/unpin synchronization, WebSocket, image, PDF, and generic file flows.
+7. Verify health, headers, two-browser text, pin/replace/unpin synchronization, WebSocket, image, PDF, DOCX, and generic file flows.
 8. Monitor errors and cleanup events through the observation window.
 
 ## Rollback

@@ -32,6 +32,11 @@ vi.mock('./VideoPreview', () => ({
     </div>
   ),
 }))
+vi.mock('./WordPreview', () => ({
+  WordPreview: ({ compact, name }: { compact?: boolean; name: string }) => compact
+    ? <section aria-label={`${name} Word thumbnail`}>DOCX thumbnail</section>
+    : <section aria-label={`${name} Word preview`}>Styled Word document</section>,
+}))
 
 
 const descriptor: FileDescriptor = {
@@ -206,6 +211,43 @@ describe('Attachment lifecycle', () => {
     expect(screen.getByRole('link', { name: 'Open in browser' })).toHaveAttribute('href', 'blob:test')
     expect(screen.getByRole('button', { name: 'Adjust scan' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'PDF workspace' })).toBeInTheDocument()
+  })
+
+  it('shows browser-local DOCX thumbnails and a full Word document preview', async () => {
+    vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['docx']))
+    const user = userEvent.setup()
+    render(
+      <Attachment
+        descriptor={{ ...descriptor, name: 'proposal.docx', mimeType: 'application/octet-stream' }}
+        credentials={credentials}
+      />,
+    )
+
+    expect(await screen.findByLabelText('proposal.docx Word thumbnail')).toHaveTextContent('DOCX thumbnail')
+    await user.click(screen.getByRole('button', { name: 'Open proposal.docx preview' }))
+
+    expect(screen.getByText('Word document preview · local renderer')).toBeInTheDocument()
+    expect(screen.getByLabelText('proposal.docx Word preview')).toHaveTextContent('Styled Word document')
+    expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open in new tab' })).not.toBeInTheDocument()
+  })
+
+  it('keeps DOCX files over 16 MB download-only', () => {
+    render(
+      <Attachment
+        descriptor={{
+          ...descriptor,
+          name: 'oversized.docx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          size: 16 * 1024 * 1024 + 1,
+        }}
+        credentials={credentials}
+      />,
+    )
+
+    expect(screen.getByText('Word previews are limited to 16 MB. Download this file to open it in Word.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open oversized.docx preview' })).not.toBeInTheDocument()
+    expect(downloadDecryptedFile).not.toHaveBeenCalled()
   })
 
   it('shows MP4 thumbnails and browser-local playback controls', async () => {

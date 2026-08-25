@@ -6,11 +6,13 @@ import {
   downloadDecryptedFile,
   type FileTransferCredentials,
 } from '../lib/file-transfer'
+import { MAX_WORD_PREVIEW_BYTES } from '../lib/word-preview'
 import { ImagePreview } from './ImagePreview'
 import { PdfHandoffButton } from './PdfHandoffButton'
 import { SecurityDialog } from './SecurityDialog'
 import { PdfPreview } from './PdfPreview'
 import { VideoPreview } from './VideoPreview'
+import { WordPreview } from './WordPreview'
 import { Button } from './ui/button'
 
 interface AttachmentProps {
@@ -34,6 +36,11 @@ const SAFE_IMAGE_TYPES: Record<string, true> = {
 
 function isPlainTextType(mimeType: string): boolean {
   return mimeType.toLowerCase().startsWith('text/')
+}
+
+function isWordDocument(name: string, mimeType: string): boolean {
+  return mimeType.toLowerCase() === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    name.toLowerCase().endsWith('.docx')
 }
 
 function fileSize(bytes: number): string {
@@ -73,12 +80,15 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
     if (isPlainTextType(descriptor.mimeType)) {
       return descriptor.size <= TEXT_PREVIEW_LIMIT_BYTES ? 'text' : 'none'
     }
+    if (isWordDocument(descriptor.name, descriptor.mimeType)) {
+      return descriptor.size <= MAX_WORD_PREVIEW_BYTES ? 'word' : 'none'
+    }
     if (descriptor.size > PREVIEW_LIMIT_BYTES) return 'none'
     if (SAFE_IMAGE_TYPES[descriptor.mimeType] === true) return 'image'
     if (descriptor.mimeType === 'application/pdf') return 'pdf'
     if (descriptor.mimeType === 'video/mp4') return 'video'
     return 'none'
-  }, [descriptor.mimeType, descriptor.size])
+  }, [descriptor.mimeType, descriptor.name, descriptor.size])
   const autoPreviewLimit = previewType === 'text'
     ? AUTO_TEXT_PREVIEW_LIMIT_BYTES
     : AUTO_PREVIEW_LIMIT_BYTES
@@ -89,7 +99,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
       ? 'PDF'
       : previewType === 'video'
         ? 'MP4'
-        : 'TXT'
+        : previewType === 'word'
+          ? 'DOCX'
+          : 'TXT'
 
   useEffect(() => {
     mountedRef.current = true
@@ -260,6 +272,8 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           <img src={objectUrl} alt="" />
         ) : previewType === 'pdf' && objectUrl && previewBlob ? (
           <PdfPreview data={previewBlob} name={descriptor.name} compact />
+        ) : previewType === 'word' && objectUrl && previewBlob ? (
+          <WordPreview data={previewBlob} name={descriptor.name} compact />
         ) : previewType === 'video' && objectUrl ? (
           <video src={objectUrl} muted playsInline preload="metadata" />
         ) : (
@@ -291,7 +305,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="workspace" />
               </>
             )}
-            {objectUrl && previewBlob && (
+            {objectUrl && previewBlob && previewType !== 'word' && (
               <Button asChild size="sm">
                 <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink />
@@ -331,9 +345,12 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
               <span className="viewer-file-glyph" aria-hidden="true">{previewGlyph}</span>
               <h3>Download to open this file</h3>
               <p>
-                {descriptor.size > PREVIEW_LIMIT_BYTES
-                  ? 'Files over 64 MB are not previewed to protect browser memory.'
-                  : 'This file type does not have a safe browser-local preview.'}
+                {isWordDocument(descriptor.name, descriptor.mimeType) &&
+                descriptor.size > MAX_WORD_PREVIEW_BYTES
+                  ? 'Word previews are limited to 16 MB to protect browser memory.'
+                  : descriptor.size > PREVIEW_LIMIT_BYTES
+                    ? 'Files over 64 MB are not previewed to protect browser memory.'
+                    : 'This file type does not have a safe browser-local preview.'}
               </p>
               <Button type="button" onClick={download}><Download /> Download file</Button>
             </div>
@@ -351,6 +368,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           )}
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
             <PdfPreview data={previewBlob} name={descriptor.name} />
+          )}
+          {!loading && previewType === 'word' && objectUrl && previewBlob && (
+            <WordPreview data={previewBlob} name={descriptor.name} />
           )}
           {!loading && previewType === 'video' && objectUrl && previewBlob && (
             <VideoPreview url={objectUrl} name={descriptor.name} variant="viewer" />
@@ -384,6 +404,8 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 <img src={objectUrl} alt="" />
               ) : previewType === 'pdf' && objectUrl && previewBlob ? (
                 <PdfPreview data={previewBlob} name={descriptor.name} compact />
+              ) : previewType === 'word' && objectUrl && previewBlob ? (
+                <WordPreview data={previewBlob} name={descriptor.name} compact />
               ) : previewType === 'video' && objectUrl ? (
                 <video src={objectUrl} muted playsInline preload="metadata" />
               ) : previewType === 'text' && previewText !== null ? (
@@ -456,7 +478,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                     ? 'PDF preview · local reader'
                     : previewType === 'video'
                       ? 'MP4 video preview'
-                      : 'Plain-text preview'}
+                      : previewType === 'word'
+                        ? 'Word document preview · local renderer'
+                        : 'Plain-text preview'}
               </strong>
               <span>{fileSize(descriptor.size)} · decrypted only in this browser</span>
             </div>
@@ -472,12 +496,14 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                     <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="workspace" />
                   </>
                 )}
-                <Button asChild size="sm">
-                  <a href={objectUrl} target="_blank" rel="noopener noreferrer">
-                    <ExternalLink />
-                    {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser' : 'Open in new tab'}
-                  </a>
-                </Button>
+                {previewType !== 'word' && (
+                  <Button asChild size="sm">
+                    <a href={objectUrl} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink />
+                      {previewType === 'image' ? 'Open full size' : previewType === 'pdf' ? 'Open in browser' : 'Open in new tab'}
+                    </a>
+                  </Button>
+                )}
               </div>
             )}
           </div>
@@ -510,6 +536,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           {!loading && previewType === 'pdf' && objectUrl && previewBlob && (
             <PdfPreview data={previewBlob} name={descriptor.name} />
           )}
+          {!loading && previewType === 'word' && objectUrl && previewBlob && (
+            <WordPreview data={previewBlob} name={descriptor.name} />
+          )}
           {!loading && previewType === 'video' && objectUrl && previewBlob && (
             <VideoPreview url={objectUrl} name={descriptor.name} variant="modal" />
           )}
@@ -530,6 +559,12 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
         descriptor.size > TEXT_PREVIEW_LIMIT_BYTES &&
         descriptor.size <= PREVIEW_LIMIT_BYTES && (
           <p className="attachment-note">Text previews are limited to 1 MB. Download this file to read it in full.</p>
+        )}
+      {previewType === 'none' &&
+        isWordDocument(descriptor.name, descriptor.mimeType) &&
+        descriptor.size > MAX_WORD_PREVIEW_BYTES &&
+        descriptor.size <= PREVIEW_LIMIT_BYTES && (
+          <p className="attachment-note">Word previews are limited to 16 MB. Download this file to open it in Word.</p>
         )}
     </section>
   )
