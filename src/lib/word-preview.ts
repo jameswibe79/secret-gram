@@ -6,14 +6,13 @@ export const MAX_WORD_UNCOMPRESSED_BYTES = 96 * 1024 * 1024
 export const MAX_WORD_ENTRY_BYTES = 64 * 1024 * 1024
 
 export const MAX_WORD_PREVIEW_BYTES = 16 * 1024 * 1024
-export const MAX_WORD_HTML_CHARACTERS = 48 * 1024 * 1024
 
 export interface WordPreviewWorkerRequest {
   arrayBuffer: ArrayBuffer
 }
 
 export type WordPreviewWorkerResponse =
-  | { type: 'ready'; html: string }
+  | { type: 'ready' }
   | { type: 'error' }
 
 function findEndOfCentralDirectory(view: DataView): number {
