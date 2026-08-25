@@ -136,6 +136,31 @@ function safeElementFactory(renderer: DocxPreviewModule) {
   }
 }
 
+function fitWordPagesToSurface(surface: HTMLElement) {
+  const shadowRoot = surface.shadowRoot
+  if (shadowRoot === null) return
+  const wrapper = shadowRoot.querySelector<HTMLElement>('.word-docx-wrapper')
+  if (wrapper === null) return
+
+  wrapper.style.removeProperty('zoom')
+  delete surface.dataset.pageFitScale
+  const compactViewport = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 640px)').matches
+    : window.innerWidth <= 640
+  if (!compactViewport) return
+
+  const pages = [...shadowRoot.querySelectorAll<HTMLElement>('section.word-docx')]
+  const pageWidth = Math.max(0, ...pages.map((page) => page.offsetWidth))
+  const pageHeight = Math.max(0, ...pages.map((page) => page.offsetHeight))
+  const availableWidth = Math.max(0, surface.clientWidth - 12)
+  const availableHeight = Math.max(0, surface.clientHeight - 12)
+  if (pageWidth === 0 || pageHeight === 0 || availableWidth === 0 || availableHeight === 0) return
+
+  const scale = Math.min(1, availableWidth / pageWidth, availableHeight / pageHeight)
+  wrapper.style.setProperty('zoom', String(scale))
+  surface.dataset.pageFitScale = scale.toFixed(4)
+}
+
 export function WordPreview({ data, name, compact = false }: WordPreviewProps) {
   const [status, setStatus] = useState<PreviewStatus>('loading')
   const surfaceRef = useRef<HTMLDivElement | null>(null)
@@ -196,6 +221,26 @@ export function WordPreview({ data, name, compact = false }: WordPreviewProps) {
       if ('adoptedStyleSheets' in shadowRoot) shadowRoot.adoptedStyleSheets = []
     }
   }, [compact, data])
+
+  useEffect(() => {
+    if (compact || status !== 'ready') return
+    const surface = surfaceRef.current
+    if (surface === null) return
+
+    let frame = window.requestAnimationFrame(() => fitWordPagesToSurface(surface))
+    if (typeof ResizeObserver === 'undefined') {
+      return () => window.cancelAnimationFrame(frame)
+    }
+    const observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(frame)
+      frame = window.requestAnimationFrame(() => fitWordPagesToSurface(surface))
+    })
+    observer.observe(surface)
+    return () => {
+      observer.disconnect()
+      window.cancelAnimationFrame(frame)
+    }
+  }, [compact, data, status])
 
   if (compact) {
     return (

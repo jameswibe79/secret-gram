@@ -8,6 +8,7 @@ const pdfMocks = vi.hoisted(() => ({
   modernGetDocument: vi.fn(),
   legacyGetDocument: vi.fn(),
   pageTextItems: [{ str: 'Selectable digital PDF text' }] as Array<{ str: string }>,
+  scaleModes: [] as string[],
 }))
 const runtimeMocks = vi.hoisted(() => ({
   loadPdfJs: vi.fn(),
@@ -61,8 +62,9 @@ const viewerModule = vi.hoisted(() => {
       return this.pageNumber
     }
 
-    set currentScaleValue(_value: string) {
-      this.currentScale = 1.25
+    set currentScaleValue(value: string) {
+      pdfMocks.scaleModes.push(value)
+      this.currentScale = value === 'page-fit' ? 0.75 : 1.25
       this.eventBus.dispatch('scalechanging', { scale: this.currentScale })
     }
 
@@ -126,6 +128,12 @@ describe('PdfPreview', () => {
     runtimeMocks.loadPdfViewer.mockReset()
     ocrMocks.recognizeImage.mockReset()
     pdfMocks.pageTextItems = [{ str: 'Selectable digital PDF text' }]
+    pdfMocks.scaleModes.length = 0
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
     pdfMocks.modernGetDocument.mockReturnValue(loadingTask(Promise.resolve(pdfDocument())))
     pdfMocks.legacyGetDocument.mockReturnValue(loadingTask(Promise.resolve(pdfDocument())))
     runtimeMocks.loadPdfJs.mockImplementation(async (build: 'modern' | 'legacy') => ({
@@ -162,6 +170,24 @@ describe('PdfPreview', () => {
     expect(pageInput).toHaveValue(2)
     expect(screen.getByRole('button', { name: 'Zoom in' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Zoom out' })).toBeEnabled()
+  })
+
+  it('fits the entire PDF page by default on phone-sized viewports', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === '(max-width: 640px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    const user = userEvent.setup()
+    render(<PdfPreview data={pdfBlob()} name="mobile.pdf" />)
+
+    const fitButton = await screen.findByRole('button', { name: 'Fit PDF page to viewer' })
+    await waitFor(() => expect(fitButton).toBeEnabled())
+    expect(pdfMocks.scaleModes).toContain('page-fit')
+    expect(fitButton).toHaveTextContent('75%')
+
+    await user.click(fitButton)
+    expect(pdfMocks.scaleModes.at(-1)).toBe('page-fit')
   })
 
   it('adds selectable OCR text over a scanned PDF page', async () => {

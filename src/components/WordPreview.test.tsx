@@ -71,6 +71,11 @@ async function formattedDocument(): Promise<Blob> {
 
 beforeEach(() => {
   vi.stubGlobal('Worker', PreviewWorker)
+  vi.stubGlobal('matchMedia', vi.fn(() => ({
+    matches: false,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  })))
 })
 
 describe('WordPreview', () => {
@@ -106,6 +111,47 @@ describe('WordPreview', () => {
     expect(shadowRoot?.querySelector('section.word-docx')).not.toBeNull()
     expect(unsafeLink).not.toHaveAttribute('href')
     expect(shadowRoot?.querySelector('iframe, object, embed, script')).toBeNull()
+  })
+
+  it('scales a full Word page to the available phone viewport', async () => {
+    workerResponse = { type: 'ready' }
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === '(max-width: 640px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
+    const clientWidth = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('word-document-surface') ? 360 : 0
+      })
+    const clientHeight = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.classList.contains('word-document-surface') ? 520 : 0
+      })
+    const offsetWidth = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.matches('section.word-docx') ? 794 : 0
+      })
+    const offsetHeight = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.matches('section.word-docx') ? 1_123 : 0
+      })
+
+    try {
+      const data = await formattedDocument()
+      const { container } = render(<WordPreview data={data} name="mobile.docx" />)
+      const surface = container.querySelector<HTMLElement>('.word-document-surface')
+
+      await waitFor(() => expect(surface).toHaveAttribute('data-page-fit-scale', '0.4383'))
+      expect(
+        surface?.shadowRoot?.querySelector<HTMLElement>('.word-docx-wrapper'),
+      ).toHaveStyle({ zoom: '0.43828715365239296' })
+    } finally {
+      clientWidth.mockRestore()
+      clientHeight.mockRestore()
+      offsetWidth.mockRestore()
+      offsetHeight.mockRestore()
+    }
   })
 
   it('shows a fail-safe state when the local DOCX validator rejects a document', async () => {

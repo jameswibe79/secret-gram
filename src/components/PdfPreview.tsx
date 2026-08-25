@@ -55,6 +55,13 @@ function pdfMaxCanvasPixels(): number {
     ? MOBILE_PDF_MAX_CANVAS_PIXELS
     : DESKTOP_PDF_MAX_CANVAS_PIXELS
 }
+
+function pdfFitMode(): 'page-fit' | 'page-width' {
+  const compactViewport = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(max-width: 640px)').matches
+    : window.innerWidth <= 640
+  return compactViewport ? 'page-fit' : 'page-width'
+}
 function pdfPageHasSelectableText(items: unknown): boolean {
   if (typeof items !== 'object' || items === null) return false
   const values = Reflect.get(items, 'items')
@@ -244,6 +251,9 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
     let onPageChanging: ((event: unknown) => void) | null = null
     let onScaleChanging: ((event: unknown) => void) | null = null
     let resolvePagesReady: (() => void) | null = null
+    let resizeObserver: ResizeObserver | null = null
+    let observedWidth = 0
+    let observedHeight = 0
     setLoading(true)
     setError('')
     setPageNumber(1)
@@ -275,10 +285,24 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
 
       onPagesInit = () => {
         if (stopped) return
-        viewer.currentScaleValue = 'page-width'
+        viewer.currentScaleValue = pdfFitMode()
         setScalePercent(Math.round(viewer.currentScale * 100))
         setLoading(false)
         resolvePagesReady?.()
+        if (typeof ResizeObserver !== 'undefined') {
+          observedWidth = container.clientWidth
+          observedHeight = container.clientHeight
+          resizeObserver = new ResizeObserver(() => {
+            if (stopped) return
+            const width = container.clientWidth
+            const height = container.clientHeight
+            if (width === observedWidth && height === observedHeight) return
+            observedWidth = width
+            observedHeight = height
+            viewer.currentScaleValue = pdfFitMode()
+          })
+          resizeObserver.observe(container)
+        }
       }
       onPageChanging = (event: unknown) => {
         const nextPage = eventNumber(event, 'pageNumber')
@@ -321,6 +345,7 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
         if (onPageChanging !== null) eventBus.off('pagechanging', onPageChanging)
         if (onScaleChanging !== null) eventBus.off('scalechanging', onScaleChanging)
       }
+      resizeObserver?.disconnect()
       viewerRef.current = null
       setPdfDocument(null)
       if (loadingTask !== null) void loadingTask.destroy()
@@ -396,10 +421,10 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
     viewerRef.current?.updateScale({ steps })
   }
 
-  function fitWidth() {
+  function fitPageToViewer() {
     const viewer = viewerRef.current
     if (viewer === null) return
-    viewer.currentScaleValue = 'page-width'
+    viewer.currentScaleValue = pdfFitMode()
   }
 
   function retryCompatibilityPreview() {
@@ -466,7 +491,7 @@ function PdfDocumentPreview({ data, name }: PdfDocumentPreviewProps) {
           <Button variant="ghost" size="icon-sm" type="button" aria-label="Zoom out" disabled={loading} onClick={() => zoom(-1)}>
             <Minus />
           </Button>
-          <button type="button" disabled={loading} onClick={fitWidth}>{scalePercent}%</button>
+          <button type="button" aria-label="Fit PDF page to viewer" disabled={loading} onClick={fitPageToViewer}>{scalePercent}%</button>
           <Button variant="ghost" size="icon-sm" type="button" aria-label="Zoom in" disabled={loading} onClick={() => zoom(1)}>
             <Plus />
           </Button>

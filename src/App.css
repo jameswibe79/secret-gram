@@ -3103,6 +3103,24 @@
     flex-wrap: wrap;
     justify-content: flex-end;
   }
+
+  .pdf-document-toolbar {
+    gap: 4px;
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .pdf-ocr-status {
+    display: none;
+  }
+
+  .pdf-document-scroll {
+    scrollbar-gutter: auto;
+  }
+
+  .pdf-document-scroll .pdfViewer {
+    padding: 6px 0 12px;
+  }
   .video-controls {
     right: 6px;
     bottom: 6px;
