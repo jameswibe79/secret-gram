@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers'
 
 import {
+  MAX_RETAINED_ROOM_EVENTS,
   clientMessageEnvelopeSchema,
   webSocketClientFrameSchema,
   type ClientMessageEnvelope,
@@ -13,7 +14,6 @@ import {
 const BASE64URL_256_PATTERN = /^[A-Za-z0-9_-]{43}$/u
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
 const MAINTENANCE_INTERVAL_MS = 3_600_000
-const MAX_RETAINED_MESSAGES = 10_000
 const MAX_RETAINED_MESSAGE_CHARACTERS = 256 * 1024 * 1024
 const MAX_ROOM_UPLOADS = 128
 const MAX_PENDING_UPLOADS = 32
@@ -41,6 +41,7 @@ export type RoomInfoResult =
       createdAt: number
       expiresAt: number
       onlineCount: number
+      remainingEvents: number
     }
   | { ok: false; reason: 'not_found' | 'unauthorized' | 'expired' }
 
@@ -83,7 +84,12 @@ interface TableInfoRow extends Record<string, SqlStorageValue> {
 type RoomFailureReason = 'not_found' | 'unauthorized' | 'expired'
 
 export type AppendMessageResult =
-  | { ok: true; duplicate: boolean; message: StoredMessageEnvelope }
+  | {
+      ok: true
+      duplicate: boolean
+      message: StoredMessageEnvelope
+      remainingEvents: number
+    }
   | {
       ok: false
       duplicate: false
@@ -410,6 +416,15 @@ export class RoomDurableObject extends DurableObject<Env> {
     }
   }
 
+  private remainingEvents(): number {
+    const usage = this.ctx.storage.sql
+      .exec<{ message_count: number } & Record<string, SqlStorageValue>>(
+        'SELECT message_count FROM room_usage WHERE singleton = 1',
+      )
+      .one()
+    return Math.max(0, MAX_RETAINED_ROOM_EVENTS - usage.message_count)
+  }
+
   private writePin(messageId: string | null, updatedAt: number): RoomPinState {
     const row = this.ctx.storage.sql
       .exec<PinRow>(
@@ -674,12 +689,16 @@ export class RoomDurableObject extends DurableObject<Env> {
     if (!(await this.isAuthorized(token, row))) {
       return { ok: false, reason: 'unauthorized' }
     }
+    this.deleteMessagesBefore(
+      Date.now() - Number(this.env.MESSAGE_RETENTION_SECONDS) * 1_000,
+    )
 
     return {
       ok: true,
       createdAt: row.created_at,
       expiresAt: row.expires_at,
       onlineCount: this.ctx.getWebSockets().length,
+      remainingEvents: this.remainingEvents(),
     }
   }
 
@@ -722,7 +741,12 @@ export class RoomDurableObject extends DurableObject<Env> {
           reason: 'message_id_conflict',
         }
       }
-      return { ok: true, duplicate: true, message: this.storedMessage(existing) }
+      return {
+        ok: true,
+        duplicate: true,
+        message: this.storedMessage(existing),
+        remainingEvents: this.remainingEvents(),
+      }
     }
 
     const reusedCounter = this.ctx.storage.sql
@@ -752,7 +776,7 @@ export class RoomDurableObject extends DurableObject<Env> {
       )
       .one()
     if (
-      usage.message_count >= MAX_RETAINED_MESSAGES ||
+      usage.message_count >= MAX_RETAINED_ROOM_EVENTS ||
       usage.message_characters + parsed.data.ciphertext.length > MAX_RETAINED_MESSAGE_CHARACTERS
     ) {
       return { ok: false, duplicate: false, message: null, reason: 'capacity' }
@@ -800,6 +824,7 @@ export class RoomDurableObject extends DurableObject<Env> {
         sequence: inserted.sequence,
         serverCreatedAt,
       },
+      remainingEvents: MAX_RETAINED_ROOM_EVENTS - usage.message_count - 1,
     }
   }
 
@@ -1401,6 +1426,7 @@ export class RoomDurableObject extends DurableObject<Env> {
         type: 'ready',
         onlineCount: this.ctx.getWebSockets().length,
         expiresAt: row.expires_at,
+        remainingEvents: this.remainingEvents(),
       }),
     )
     this.broadcastPresence()
@@ -1463,13 +1489,20 @@ export class RoomDurableObject extends DurableObject<Env> {
       )
       return
     }
-    if (!result.duplicate) this.broadcast({ type: 'message', message: result.message })
+    if (!result.duplicate) {
+      this.broadcast({
+        type: 'message',
+        message: result.message,
+        remainingEvents: result.remainingEvents,
+      })
+    }
     socket.send(
       JSON.stringify({
         type: 'ack',
         id: result.message.id,
         sequence: result.message.sequence,
         duplicate: result.duplicate,
+        remainingEvents: result.remainingEvents,
       }),
     )
   }

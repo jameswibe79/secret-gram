@@ -8,6 +8,7 @@ import type {
   StoredRoomEvent,
 } from '../shared/protocol'
 import {
+  remainingRoomEventsSchema,
   roomPinStateSchema,
   storedMessageEnvelopeSchema,
   storedRecallEventSchema,
@@ -39,6 +40,7 @@ const roomInfoSchema = z.strictObject({
   createdAt: timestampMillisecondsSchema,
   expiresAt: timestampMillisecondsSchema,
   onlineCount: z.number().int().nonnegative(),
+  remainingEvents: remainingRoomEventsSchema,
 })
 const createRoomResultSchema = z.strictObject({
   created: z.boolean(),
@@ -48,6 +50,7 @@ const messageHistorySchema = z.strictObject({ messages: z.array(storedRoomEventS
 const postedMessageSchema = z.strictObject({
   duplicate: z.boolean(),
   message: storedMessageEnvelopeSchema,
+  remainingEvents: remainingRoomEventsSchema,
 })
 const recalledMessageSchema = z.strictObject({
   duplicate: z.boolean(),
@@ -150,6 +153,7 @@ export interface RoomInfo {
   createdAt: number
   expiresAt: number
   onlineCount: number
+  remainingEvents: number
 }
 
 export interface CreateRoomResult {
@@ -197,6 +201,7 @@ export async function getRoomMessages(
 export interface PostedMessageResult {
   duplicate: boolean
   message: StoredMessageEnvelope
+  remainingEvents: number
 }
 
 export function postRoomMessage(

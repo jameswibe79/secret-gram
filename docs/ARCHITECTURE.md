@@ -132,6 +132,9 @@ This protocol does not implement a Double Ratchet, sender authentication signatu
 8. Reconnect uses sequence-based history catch-up and drains every page before flushing pending messages.
 9. Recall events use the same ordered history and WebSocket stream, replacing message content with a tombstone on every connected client.
 10. Pin state is fetched alongside catch-up and updated through versioned WebSocket frames.
+11. Authenticated room metadata and WebSocket delivery frames report the remaining retained-event
+    slots. A newly stored message consumes one slot, an idempotent retry does not, and recall replaces
+    the existing row without consuming another slot. Retention cleanup restores slots.
 
 Server acknowledgement means only that ciphertext was stored. It is not a recipient read or delivery receipt.
 

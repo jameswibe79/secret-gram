@@ -16,7 +16,9 @@ afterEach(() => {
 describe('room API client', () => {
   it('keeps the room token in the Authorization header', async () => {
     const fetchMock = vi.fn(async () =>
-      Response.json({ data: { createdAt: 1, expiresAt: 2, onlineCount: 0 } }),
+      Response.json({
+        data: { createdAt: 1, expiresAt: 2, onlineCount: 0, remainingEvents: 10_000 },
+      }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
@@ -24,6 +26,7 @@ describe('room API client', () => {
       createdAt: 1,
       expiresAt: 2,
       onlineCount: 0,
+      remainingEvents: 10_000,
     })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/v1/rooms/locator',

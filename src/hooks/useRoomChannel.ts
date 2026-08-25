@@ -4,6 +4,7 @@ import {
   ApiError,
   createSocketTicket,
   getRoomMessages,
+  getRoomInfo,
   getRoomPin,
   postRoomMessage,
   recallRoomMessage,
@@ -100,6 +101,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
   const [messages, setMessages] = useState<TimelineMessage[]>([])
   const [status, setStatus] = useState<ConnectionStatus>('connecting')
   const [onlineCount, setOnlineCount] = useState(0)
+  const [remainingEvents, setRemainingEvents] = useState<number | null>(null)
   const [connectionError, setConnectionError] = useState('')
   const [pinnedMessageId, setPinnedMessageId] = useState<string | null>(null)
   const [pinningMessageId, setPinningMessageId] = useState<string | null>(null)
@@ -200,6 +202,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
           session.deviceId,
           pending.envelope,
         )
+        setRemainingEvents(result.remainingEvents)
         await applyStored(result.message)
       } catch (error) {
         settlePending(pending.envelope.id)
@@ -243,12 +246,20 @@ export function useRoomChannel(session: ActiveRoomSession) {
 
     const syncRoom = async () => {
       await syncHistory()
+      const info = await getRoomInfo(
+        session.locator,
+        session.authToken,
+        lifecycle.signal,
+      )
       const pin = await getRoomPin(
         session.locator,
         session.authToken,
         lifecycle.signal,
       )
-      if (!stopped) applyPin(pin)
+      if (!stopped) {
+        applyPin(pin)
+        setRemainingEvents(info.remainingEvents)
+      }
     }
 
     const flushPending = async () => {
@@ -338,17 +349,22 @@ export function useRoomChannel(session: ActiveRoomSession) {
             return
           }
           const frame = parsed.data
-          if (frame.type === 'ready' || frame.type === 'presence') {
+          if (frame.type === 'ready') {
+            setOnlineCount(frame.onlineCount)
+            setRemainingEvents(frame.remainingEvents)
+          } else if (frame.type === 'presence') {
             setOnlineCount(frame.onlineCount)
           } else if (frame.type === 'pong') {
             lastPongAt = Date.now()
           } else if (frame.type === 'message') {
+            setRemainingEvents(frame.remainingEvents)
             void applyStored(frame.message)
           } else if (frame.type === 'recall') {
             applyRecall(frame)
           } else if (frame.type === 'pin') {
             applyPin(frame.pin)
           } else if (frame.type === 'ack') {
+            setRemainingEvents(frame.remainingEvents)
             settlePending(frame.id)
             setMessages((current) => {
               const existing = current.find((message) => message.id === frame.id)
@@ -592,6 +608,7 @@ export function useRoomChannel(session: ActiveRoomSession) {
     messages,
     status,
     onlineCount,
+    remainingEvents,
     pinnedMessageId,
     pinningMessageId,
     pinError,

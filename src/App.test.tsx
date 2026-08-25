@@ -45,6 +45,7 @@ beforeEach(() => {
     createdAt: Date.now(),
     expiresAt: Date.now() + 60_000,
     onlineCount: 1,
+    remainingEvents: 10_000,
   })
   vi.mocked(getRoomMessages).mockReset().mockResolvedValue([])
   vi.mocked(getRoomPin).mockReset().mockResolvedValue({
@@ -57,6 +58,7 @@ beforeEach(() => {
     async (_locator, _token, _deviceId, envelope) => ({
       duplicate: false,
       message: { ...envelope, sequence: 1, serverCreatedAt: Date.now() },
+      remainingEvents: 9_999,
     }),
   )
   vi.mocked(recallRoomMessage).mockReset().mockImplementation(
@@ -236,6 +238,19 @@ describe('SecretGram application', () => {
       createdLocator,
       expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u),
     )
+  })
+
+  it('shows the live number of retained event slots remaining', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await user.click(screen.getByRole('tab', { name: 'Create room' }))
+    await user.click(screen.getByRole('button', { name: 'Create secure room' }))
+
+    expect(await screen.findByText('· 10,000 events remaining')).toBeInTheDocument()
+    await user.type(screen.getByRole('textbox', { name: 'Shared text' }), 'Capacity update')
+    await user.click(screen.getByRole('button', { name: 'Share' }))
+
+    expect(await screen.findByText('· 9,999 events remaining')).toBeInTheDocument()
   })
 
   it('removes a shared item through an in-app confirmation dialog', async () => {

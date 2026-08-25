@@ -199,7 +199,8 @@ Current defaults:
 - room maximum lifetime: 30 days;
 - message retention: 7 days;
 - room-wide message ceiling: 600 per minute;
-- retained message ceiling: 10,000 messages or 256 MiB ciphertext characters per room;
+- retained event ceiling: 10,000 rows or 256 MiB ciphertext characters per room; the authenticated
+  room UI reports remaining row slots, while the character ceiling may be reached first;
 - encrypted file reservations per room: 512 MiB;
 - pending uploads per room: 32;
 - total upload records per room: 128;

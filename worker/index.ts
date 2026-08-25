@@ -207,7 +207,11 @@ async function route(request: Request, env: Env, requestId: string): Promise<Res
     )
     if (!result.ok) throw roomFailure(result.reason)
     return successResponse(
-      { duplicate: result.duplicate, message: result.message },
+      {
+        duplicate: result.duplicate,
+        message: result.message,
+        remainingEvents: result.remainingEvents,
+      },
       result.duplicate ? 200 : 201,
       requestId,
     )
@@ -501,6 +505,7 @@ async function route(request: Request, env: Env, requestId: string): Promise<Res
         createdAt: result.createdAt,
         expiresAt: result.expiresAt,
         onlineCount: result.onlineCount,
+        remainingEvents: result.remainingEvents,
       },
       200,
       requestId,

@@ -3,6 +3,7 @@ import { runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test'
 import { describe, expect, it } from 'vitest'
 
 import {
+  MAX_RETAINED_ROOM_EVENTS,
   webSocketServerFrameSchema,
   type ClientMessageEnvelope,
   type WebSocketServerFrame,
@@ -88,7 +89,10 @@ describe('RoomDurableObject authentication', () => {
 
     expect(initialized.ok).toBe(true)
     expect(initialized.created).toBe(true)
-    expect((await room.getInfo(auth.token)).ok).toBe(true)
+    expect(await room.getInfo(auth.token)).toMatchObject({
+      ok: true,
+      remainingEvents: MAX_RETAINED_ROOM_EVENTS,
+    })
     expect((await room.getInfo(bytesToBase64Url(new Uint8Array(32)))).ok).toBe(false)
 
     await runInDurableObject(room, (_instance, state) => state.storage.deleteAlarm())
@@ -142,12 +146,18 @@ describe('RoomDurableObject authentication', () => {
     })
     const history = await room.getMessages(auth.token, 0, 50)
 
-    expect(first.ok).toBe(true)
-    expect(first.duplicate).toBe(false)
-    expect(first.message?.sequence).toBe(1)
-    expect(retry.ok).toBe(true)
-    expect(retry.duplicate).toBe(true)
-    expect(retry.message?.sequence).toBe(1)
+    expect(first).toMatchObject({
+      ok: true,
+      duplicate: false,
+      message: { sequence: 1 },
+      remainingEvents: MAX_RETAINED_ROOM_EVENTS - 1,
+    })
+    expect(retry).toMatchObject({
+      ok: true,
+      duplicate: true,
+      message: { sequence: 1 },
+      remainingEvents: MAX_RETAINED_ROOM_EVENTS - 1,
+    })
     expect(conflict).toMatchObject({ ok: false, reason: 'message_id_conflict' })
     expect(counterReuse).toMatchObject({ ok: false, reason: 'sender_counter_conflict' })
     expect(history.ok).toBe(true)
@@ -393,9 +403,13 @@ describe('RoomDurableObject authentication', () => {
     const senderId = crypto.randomUUID()
     await room.initialize({ locator, authVerifier: auth.verifier, ttlSeconds: 3_600 })
     await runInDurableObject(room, (_instance, state) => {
-      state.storage.sql.exec('UPDATE room_usage SET message_count = 10000 WHERE singleton = 1')
+      state.storage.sql.exec(
+        'UPDATE room_usage SET message_count = ? WHERE singleton = 1',
+        MAX_RETAINED_ROOM_EVENTS,
+      )
     })
 
+    expect(await room.getInfo(auth.token)).toMatchObject({ ok: true, remainingEvents: 0 })
     expect(await room.appendMessage(auth.token, senderId, envelope(senderId))).toMatchObject({
       ok: false,
       reason: 'capacity',
@@ -642,7 +656,17 @@ describe('RoomDurableObject authentication', () => {
     const secondReady = waitForFrame(secondSocket, 'ready')
     firstSocket.accept()
     secondSocket.accept()
-    await Promise.all([firstReady, secondReady])
+    const readyFrames = await Promise.all([firstReady, secondReady])
+    expect(readyFrames).toEqual([
+      expect.objectContaining({
+        type: 'ready',
+        remainingEvents: MAX_RETAINED_ROOM_EVENTS,
+      }),
+      expect.objectContaining({
+        type: 'ready',
+        remainingEvents: MAX_RETAINED_ROOM_EVENTS,
+      }),
+    ])
 
     const outbound = { ...envelope(firstDevice), recallVerifier: recall.verifier }
     const firstDelivery = waitForFrame(firstSocket, 'message')
@@ -650,13 +674,22 @@ describe('RoomDurableObject authentication', () => {
     const acknowledgement = waitForFrame(firstSocket, 'ack')
     firstSocket.send(JSON.stringify({ type: 'message', envelope: outbound }))
 
-    await expect(firstDelivery).resolves.toMatchObject({ type: 'message', message: outbound })
-    await expect(secondDelivery).resolves.toMatchObject({ type: 'message', message: outbound })
+    await expect(firstDelivery).resolves.toMatchObject({
+      type: 'message',
+      message: outbound,
+      remainingEvents: MAX_RETAINED_ROOM_EVENTS - 1,
+    })
+    await expect(secondDelivery).resolves.toMatchObject({
+      type: 'message',
+      message: outbound,
+      remainingEvents: MAX_RETAINED_ROOM_EVENTS - 1,
+    })
     await expect(acknowledgement).resolves.toMatchObject({
       type: 'ack',
       id: outbound.id,
       sequence: 1,
       duplicate: false,
+      remainingEvents: MAX_RETAINED_ROOM_EVENTS - 1,
     })
     const firstPin = waitForFrame(firstSocket, 'pin')
     const secondPin = waitForFrame(secondSocket, 'pin')

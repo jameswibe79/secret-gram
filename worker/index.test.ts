@@ -1,7 +1,10 @@
 import { exports } from 'cloudflare:workers'
 import { describe, expect, it } from 'vitest'
 
-import type { ClientMessageEnvelope } from '../src/shared/protocol'
+import {
+  MAX_RETAINED_ROOM_EVENTS,
+  type ClientMessageEnvelope,
+} from '../src/shared/protocol'
 
 function bytesToBase64Url(bytes: Uint8Array): string {
   let binary = ''
@@ -78,7 +81,11 @@ describe('SecretGram Worker API', () => {
     })
     expect(info.status).toBe(200)
     await expect(info.json()).resolves.toMatchObject({
-      data: { onlineCount: 0, expiresAt: expect.any(Number) },
+      data: {
+        onlineCount: 0,
+        expiresAt: expect.any(Number),
+        remainingEvents: MAX_RETAINED_ROOM_EVENTS,
+      },
     })
 
     const unauthorized = await api(`/api/v1/rooms/${room.locator}`, {
@@ -127,7 +134,11 @@ describe('SecretGram Worker API', () => {
     })
     expect(posted.status).toBe(201)
     await expect(posted.json()).resolves.toMatchObject({
-      data: { duplicate: false, message: { ...message, sequence: 1 } },
+      data: {
+        duplicate: false,
+        message: { ...message, sequence: 1 },
+        remainingEvents: MAX_RETAINED_ROOM_EVENTS - 1,
+      },
     })
 
     const history = await api(`/api/v1/rooms/${room.locator}/messages?after=0&limit=50`, {

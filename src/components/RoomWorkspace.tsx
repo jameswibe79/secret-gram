@@ -149,6 +149,7 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
     messages,
     status,
     onlineCount,
+    remainingEvents,
     pinnedMessageId,
     pinningMessageId,
     pinError,
@@ -511,6 +512,12 @@ export function RoomWorkspace({ session, onLeave, theme, onToggleTheme }: RoomWo
                 <span>{statusLabel(status)}</span>
                 {status === 'connected' && (
                   <span>· {onlineCount} online device{onlineCount === 1 ? '' : 's'}</span>
+                )}
+                {remainingEvents !== null && (
+                  <span>
+                    · {remainingEvents.toLocaleString('en-US')} event
+                    {remainingEvents === 1 ? '' : 's'} remaining
+                  </span>
                 )}
               </div>
             </div>

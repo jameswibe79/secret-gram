@@ -7,6 +7,7 @@ export const DEFAULT_FILE_CHUNK_SIZE = 4 * 1024 * 1024
 export const MAX_FILE_BYTES = 64 * 1024 * 1024
 export const MAX_FILE_CHUNKS = 4_096
 export const MAX_MESSAGE_COUNTER = 0xffff_ffff
+export const MAX_RETAINED_ROOM_EVENTS = 10_000
 export const MAX_ECMASCRIPT_TIMESTAMP_MS = 8_640_000_000_000_000
 
 const uuidSchema = z.string().uuid()
@@ -17,6 +18,11 @@ export const timestampMillisecondsSchema = z
   .int()
   .nonnegative()
   .max(MAX_ECMASCRIPT_TIMESTAMP_MS)
+export const remainingRoomEventsSchema = z
+  .number()
+  .int()
+  .nonnegative()
+  .max(MAX_RETAINED_ROOM_EVENTS)
 
 export const fileDescriptorSchema = z.strictObject({
   fileId: uuidSchema,
@@ -93,14 +99,20 @@ export const webSocketServerFrameSchema = z.discriminatedUnion('type', [
     type: z.literal('ready'),
     onlineCount: z.number().int().nonnegative(),
     expiresAt: timestampMillisecondsSchema,
+    remainingEvents: remainingRoomEventsSchema,
   }),
   z.strictObject({ type: z.literal('presence'), onlineCount: z.number().int().nonnegative() }),
-  z.strictObject({ type: z.literal('message'), message: storedMessageEnvelopeSchema }),
+  z.strictObject({
+    type: z.literal('message'),
+    message: storedMessageEnvelopeSchema,
+    remainingEvents: remainingRoomEventsSchema,
+  }),
   z.strictObject({
     type: z.literal('ack'),
     id: uuidSchema,
     sequence: z.number().int().positive(),
     duplicate: z.boolean(),
+    remainingEvents: remainingRoomEventsSchema,
   }),
   z.strictObject({
     type: z.literal('recall'),
