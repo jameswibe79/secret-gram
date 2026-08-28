@@ -37,6 +37,11 @@ vi.mock('./WordPreview', () => ({
     ? <section aria-label={`${name} Word thumbnail`}>DOCX thumbnail</section>
     : <section aria-label={`${name} Word preview`}>Styled Word document</section>,
 }))
+vi.mock('./SpreadsheetPreview', () => ({
+  SpreadsheetPreview: ({ compact, name }: { compact?: boolean; name: string }) => compact
+    ? <section aria-label={`${name} spreadsheet thumbnail`}>XLSX thumbnail</section>
+    : <section aria-label={`${name} spreadsheet preview`}>Styled spreadsheet</section>,
+}))
 
 
 const descriptor: FileDescriptor = {
@@ -247,6 +252,43 @@ describe('Attachment lifecycle', () => {
 
     expect(screen.getByText('Word previews are limited to 16 MB. Download this file to open it in Word.')).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open oversized.docx preview' })).not.toBeInTheDocument()
+    expect(downloadDecryptedFile).not.toHaveBeenCalled()
+  })
+
+  it('shows browser-local XLSX thumbnails and a full spreadsheet preview', async () => {
+    vi.mocked(downloadDecryptedFile).mockResolvedValue(new Blob(['xlsx']))
+    const user = userEvent.setup()
+    render(
+      <Attachment
+        descriptor={{ ...descriptor, name: 'budget.xlsx', mimeType: 'application/octet-stream' }}
+        credentials={credentials}
+      />,
+    )
+
+    expect(await screen.findByLabelText('budget.xlsx spreadsheet thumbnail')).toHaveTextContent('XLSX thumbnail')
+    await user.click(screen.getByRole('button', { name: 'Open budget.xlsx preview' }))
+
+    expect(screen.getByText('Spreadsheet preview · local renderer')).toBeInTheDocument()
+    expect(screen.getByLabelText('budget.xlsx spreadsheet preview')).toHaveTextContent('Styled spreadsheet')
+    expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Open in new tab' })).not.toBeInTheDocument()
+  })
+
+  it('keeps XLSX files over 16 MB download-only', () => {
+    render(
+      <Attachment
+        descriptor={{
+          ...descriptor,
+          name: 'oversized.xlsx',
+          mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          size: 16 * 1024 * 1024 + 1,
+        }}
+        credentials={credentials}
+      />,
+    )
+
+    expect(screen.getByText('Spreadsheet previews are limited to 16 MB. Download this file to open it in Excel.')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open oversized.xlsx preview' })).not.toBeInTheDocument()
     expect(downloadDecryptedFile).not.toHaveBeenCalled()
   })
 

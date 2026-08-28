@@ -7,11 +7,13 @@ import {
   type FileTransferCredentials,
 } from '../lib/file-transfer'
 import { MAX_WORD_PREVIEW_BYTES } from '../lib/word-preview'
+import { MAX_SPREADSHEET_PREVIEW_BYTES } from '../lib/spreadsheet-preview'
 import { ImagePreview } from './ImagePreview'
 import { PdfHandoffButton } from './PdfHandoffButton'
 import { SecurityDialog } from './SecurityDialog'
 import { PdfPreview } from './PdfPreview'
 import { VideoPreview } from './VideoPreview'
+import { SpreadsheetPreview } from './SpreadsheetPreview'
 import { WordPreview } from './WordPreview'
 import { Button } from './ui/button'
 
@@ -41,6 +43,11 @@ function isPlainTextType(mimeType: string): boolean {
 function isWordDocument(name: string, mimeType: string): boolean {
   return mimeType.toLowerCase() === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
     name.toLowerCase().endsWith('.docx')
+}
+
+function isSpreadsheet(name: string, mimeType: string): boolean {
+  return mimeType.toLowerCase() === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+    name.toLowerCase().endsWith('.xlsx')
 }
 
 function fileSize(bytes: number): string {
@@ -83,6 +90,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
     if (isWordDocument(descriptor.name, descriptor.mimeType)) {
       return descriptor.size <= MAX_WORD_PREVIEW_BYTES ? 'word' : 'none'
     }
+    if (isSpreadsheet(descriptor.name, descriptor.mimeType)) {
+      return descriptor.size <= MAX_SPREADSHEET_PREVIEW_BYTES ? 'spreadsheet' : 'none'
+    }
     if (descriptor.size > PREVIEW_LIMIT_BYTES) return 'none'
     if (SAFE_IMAGE_TYPES[descriptor.mimeType] === true) return 'image'
     if (descriptor.mimeType === 'application/pdf') return 'pdf'
@@ -101,7 +111,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
         ? 'MP4'
         : previewType === 'word'
           ? 'DOCX'
-          : 'TXT'
+          : previewType === 'spreadsheet'
+            ? 'XLSX'
+            : 'TXT'
 
   useEffect(() => {
     mountedRef.current = true
@@ -274,6 +286,8 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           <PdfPreview data={previewBlob} name={descriptor.name} compact />
         ) : previewType === 'word' && objectUrl && previewBlob ? (
           <WordPreview data={previewBlob} name={descriptor.name} compact />
+        ) : previewType === 'spreadsheet' && objectUrl && previewBlob ? (
+          <SpreadsheetPreview data={previewBlob} name={descriptor.name} compact />
         ) : previewType === 'video' && objectUrl ? (
           <video src={objectUrl} muted playsInline preload="metadata" />
         ) : (
@@ -305,7 +319,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="workspace" />
               </>
             )}
-            {objectUrl && previewBlob && previewType !== 'word' && (
+            {objectUrl && previewBlob && previewType !== 'word' && previewType !== 'spreadsheet' && (
               <Button asChild size="sm">
                 <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                   <ExternalLink />
@@ -348,6 +362,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 {isWordDocument(descriptor.name, descriptor.mimeType) &&
                 descriptor.size > MAX_WORD_PREVIEW_BYTES
                   ? 'Word previews are limited to 16 MB to protect browser memory.'
+                  : isSpreadsheet(descriptor.name, descriptor.mimeType) &&
+                      descriptor.size > MAX_SPREADSHEET_PREVIEW_BYTES
+                    ? 'Spreadsheet previews are limited to 16 MB to protect browser memory.'
                   : descriptor.size > PREVIEW_LIMIT_BYTES
                     ? 'Files over 64 MB are not previewed to protect browser memory.'
                     : 'This file type does not have a safe browser-local preview.'}
@@ -371,6 +388,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           )}
           {!loading && previewType === 'word' && objectUrl && previewBlob && (
             <WordPreview data={previewBlob} name={descriptor.name} />
+          )}
+          {!loading && previewType === 'spreadsheet' && objectUrl && previewBlob && (
+            <SpreadsheetPreview data={previewBlob} name={descriptor.name} />
           )}
           {!loading && previewType === 'video' && objectUrl && previewBlob && (
             <VideoPreview url={objectUrl} name={descriptor.name} variant="viewer" />
@@ -406,6 +426,8 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                 <PdfPreview data={previewBlob} name={descriptor.name} compact />
               ) : previewType === 'word' && objectUrl && previewBlob ? (
                 <WordPreview data={previewBlob} name={descriptor.name} compact />
+              ) : previewType === 'spreadsheet' && objectUrl && previewBlob ? (
+                <SpreadsheetPreview data={previewBlob} name={descriptor.name} compact />
               ) : previewType === 'video' && objectUrl ? (
                 <video src={objectUrl} muted playsInline preload="metadata" />
               ) : previewType === 'text' && previewText !== null ? (
@@ -480,7 +502,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                       ? 'MP4 video preview'
                       : previewType === 'word'
                         ? 'Word document preview · local renderer'
-                        : 'Plain-text preview'}
+                        : previewType === 'spreadsheet'
+                          ? 'Spreadsheet preview · local renderer'
+                          : 'Plain-text preview'}
               </strong>
               <span>{fileSize(descriptor.size)} · decrypted only in this browser</span>
             </div>
@@ -496,7 +520,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                     <PdfHandoffButton data={previewBlob} name={descriptor.name} tool="workspace" />
                   </>
                 )}
-                {previewType !== 'word' && (
+                {previewType !== 'word' && previewType !== 'spreadsheet' && (
                   <Button asChild size="sm">
                     <a href={objectUrl} target="_blank" rel="noopener noreferrer">
                       <ExternalLink />
@@ -539,6 +563,9 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
           {!loading && previewType === 'word' && objectUrl && previewBlob && (
             <WordPreview data={previewBlob} name={descriptor.name} />
           )}
+          {!loading && previewType === 'spreadsheet' && objectUrl && previewBlob && (
+            <SpreadsheetPreview data={previewBlob} name={descriptor.name} />
+          )}
           {!loading && previewType === 'video' && objectUrl && previewBlob && (
             <VideoPreview url={objectUrl} name={descriptor.name} variant="modal" />
           )}
@@ -565,6 +592,12 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
         descriptor.size > MAX_WORD_PREVIEW_BYTES &&
         descriptor.size <= PREVIEW_LIMIT_BYTES && (
           <p className="attachment-note">Word previews are limited to 16 MB. Download this file to open it in Word.</p>
+        )}
+      {previewType === 'none' &&
+        isSpreadsheet(descriptor.name, descriptor.mimeType) &&
+        descriptor.size > MAX_SPREADSHEET_PREVIEW_BYTES &&
+        descriptor.size <= PREVIEW_LIMIT_BYTES && (
+          <p className="attachment-note">Spreadsheet previews are limited to 16 MB. Download this file to open it in Excel.</p>
         )}
     </section>
   )

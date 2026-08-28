@@ -1565,7 +1565,8 @@
   border-radius: 0;
 }
 
-.attachment-viewer-stage > .word-document-preview {
+.attachment-viewer-stage > .word-document-preview,
+.attachment-viewer-stage > .spreadsheet-preview {
   min-height: 480px;
   height: 100%;
   border: 0;
@@ -1770,6 +1771,212 @@
 
 .word-preview-compact-page i:nth-of-type(2) {
   width: 78%;
+}
+
+.spreadsheet-preview {
+  display: grid;
+  min-width: 0;
+  min-height: 280px;
+  overflow: hidden;
+  color: #20242c;
+  background: #f4f7f5;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.spreadsheet-preview-message {
+  display: grid;
+  min-height: 280px;
+  padding: 24px;
+  color: #4b5563;
+  text-align: center;
+  place-content: center;
+}
+
+.spreadsheet-preview-message strong {
+  color: #20242c;
+  font-size: 12px;
+}
+
+.spreadsheet-preview-message span {
+  margin-top: 5px;
+  font-size: 10px;
+}
+
+.spreadsheet-preview-message.is-error strong {
+  color: #a22b2b;
+}
+
+.spreadsheet-workbook {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+}
+
+.spreadsheet-sheet-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 6px;
+  background: #eef2ef;
+  border-bottom: 1px solid #cdd5cf;
+}
+
+.spreadsheet-sheet-tabs {
+  flex: 1;
+  justify-content: flex-start;
+  width: auto;
+  min-width: 0;
+  height: 32px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: #e1e8e3;
+}
+
+.spreadsheet-sheet-tabs button {
+  max-width: 180px;
+  overflow: hidden;
+  color: #445048;
+  font-size: 10px;
+  text-overflow: ellipsis;
+}
+
+.spreadsheet-limit-note {
+  flex: 0 0 auto;
+  color: #69550b;
+  font-size: 8px;
+}
+
+.spreadsheet-sheet-content {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.spreadsheet-table-scroll {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: white;
+}
+
+.spreadsheet-table-scroll:focus-visible {
+  outline: 3px solid var(--ring);
+  outline-offset: -3px;
+}
+
+.spreadsheet-table-scroll table {
+  width: max-content;
+  min-width: 100%;
+  border-spacing: 0;
+  table-layout: fixed;
+  font: 10px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.spreadsheet-table-scroll th,
+.spreadsheet-table-scroll td {
+  height: 28px;
+  padding: 5px 7px;
+  border-right: 1px solid #dfe4e0;
+  border-bottom: 1px solid #dfe4e0;
+}
+
+.spreadsheet-table-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  min-width: 112px;
+  color: #536057;
+  font-weight: 650;
+  text-align: center;
+  background: #eef2ef;
+}
+
+.spreadsheet-table-scroll tbody th,
+.spreadsheet-corner {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  width: 44px;
+  min-width: 44px !important;
+  color: #637067;
+  font-weight: 600;
+  text-align: right;
+  background: #eef2ef;
+}
+
+.spreadsheet-table-scroll .spreadsheet-corner {
+  z-index: 3;
+}
+
+.spreadsheet-table-scroll td {
+  min-width: 112px;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spreadsheet-empty-sheet {
+  display: grid;
+  min-height: 220px;
+  color: #5f6b63;
+  font-size: 11px;
+  place-items: center;
+}
+
+.spreadsheet-sheet-summary {
+  padding: 5px 9px;
+  margin: 0;
+  color: #647169;
+  font-size: 8px;
+  background: #f2f5f3;
+  border-top: 1px solid #dfe4e0;
+}
+
+.spreadsheet-preview.compact {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  place-items: start center;
+}
+
+.spreadsheet-compact-sheet {
+  display: grid;
+  gap: 4px;
+  width: 88px;
+  min-height: 100px;
+  padding: 10px;
+  background: white;
+  box-shadow: 0 4px 12px rgb(18 27 38 / 18%);
+}
+
+.spreadsheet-compact-sheet strong {
+  margin-bottom: 5px;
+  color: #166534;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+}
+
+.spreadsheet-compact-sheet > span {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+}
+
+.spreadsheet-compact-sheet i {
+  display: block;
+  height: 10px;
+  background: #e5ece7;
+  border: 1px solid #d3ddd6;
 }
 
 .attachment-no-preview {
@@ -2291,6 +2498,7 @@
 .modal-video-preview,
 .pdf-document-preview,
 .word-document-preview,
+.spreadsheet-preview,
 .preview-loading-state,
 .preview-error-state {
   min-height: 0;
