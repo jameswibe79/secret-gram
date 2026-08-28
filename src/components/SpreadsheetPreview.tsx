@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 
 import type {
+  SpreadsheetPreviewBorder,
+  SpreadsheetPreviewStyle,
   SpreadsheetPreviewWorkbook,
   SpreadsheetPreviewWorkerResponse,
 } from '../lib/spreadsheet-preview'
@@ -65,6 +67,32 @@ function columnLabel(column: number): string {
   return label
 }
 
+function borderCss(border: SpreadsheetPreviewBorder | undefined): string | undefined {
+  return border === undefined
+    ? undefined
+    : `${border.width}px ${border.style} ${border.color}`
+}
+
+function cellCss(style: SpreadsheetPreviewStyle | undefined): CSSProperties {
+  if (style === undefined) return {}
+  return {
+    backgroundColor: style.backgroundColor,
+    borderTop: borderCss(style.borderTop),
+    borderRight: borderCss(style.borderRight),
+    borderBottom: borderCss(style.borderBottom),
+    borderLeft: borderCss(style.borderLeft),
+    color: style.color,
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize === undefined ? undefined : `${style.fontSize}pt`,
+    fontStyle: style.fontStyle,
+    fontWeight: style.fontWeight,
+    textAlign: style.textAlign,
+    textDecoration: style.textDecoration,
+    verticalAlign: style.verticalAlign,
+    whiteSpace: style.whiteSpace,
+  }
+}
+
 export function SpreadsheetPreview({ data, name, compact = false }: SpreadsheetPreviewProps) {
   const [status, setStatus] = useState<PreviewStatus>('loading')
   const [workbook, setWorkbook] = useState<SpreadsheetPreviewWorkbook | null>(null)
@@ -92,10 +120,32 @@ export function SpreadsheetPreview({ data, name, compact = false }: SpreadsheetP
 
   const activeSheetIndex = Number(activeSheet)
   const sheet = workbook?.sheets[activeSheetIndex] ?? null
-  const visibleColumnCount = Math.max(1, Math.min(sheet?.columnCount ?? 1, 64))
+  const visibleColumnCount = Math.max(1, sheet?.columnWidths.length ?? 1)
   const columns = useMemo(
     () => Array.from({ length: visibleColumnCount }, (_, index) => columnLabel(index + 1)),
     [visibleColumnCount],
+  )
+  const mergeLayout = useMemo(() => {
+    const anchors = new Map<string, { rowSpan: number; columnSpan: number }>()
+    const covered = new Set<string>()
+    for (const merge of sheet?.merges ?? []) {
+      anchors.set(`${merge.startRow}:${merge.startColumn}`, {
+        rowSpan: merge.endRow - merge.startRow + 1,
+        columnSpan: merge.endColumn - merge.startColumn + 1,
+      })
+      for (let row = merge.startRow; row <= merge.endRow; row += 1) {
+        for (let column = merge.startColumn; column <= merge.endColumn; column += 1) {
+          if (row !== merge.startRow || column !== merge.startColumn) {
+            covered.add(`${row}:${column}`)
+          }
+        }
+      }
+    }
+    return { anchors, covered }
+  }, [sheet])
+  const tableWidth = useMemo(
+    () => 44 + (sheet?.columnWidths.reduce((total, width) => total + width, 0) ?? 112),
+    [sheet],
   )
 
   if (compact) {
@@ -148,8 +198,14 @@ export function SpreadsheetPreview({ data, name, compact = false }: SpreadsheetP
               <div className="spreadsheet-empty-sheet">This worksheet is empty.</div>
             ) : (
               <div className="spreadsheet-table-scroll" tabIndex={0}>
-                <table>
+                <table style={{ width: tableWidth }}>
                   <caption className="sr-only">{sheet.name} cell values</caption>
+                  <colgroup>
+                    <col style={{ width: 44 }} />
+                    {sheet.columnWidths.map((width, index) => (
+                      <col key={columns[index]} style={{ width }} />
+                    ))}
+                  </colgroup>
                   <thead>
                     <tr>
                       <th className="spreadsheet-corner" aria-hidden="true" />
@@ -158,11 +214,34 @@ export function SpreadsheetPreview({ data, name, compact = false }: SpreadsheetP
                   </thead>
                   <tbody>
                     {sheet.rows.map((row, rowIndex) => (
-                      <tr key={rowIndex}>
+                      <tr
+                        key={rowIndex}
+                        style={sheet.rowHeights[rowIndex] > 0
+                          ? { height: sheet.rowHeights[rowIndex] }
+                          : undefined}
+                      >
                         <th scope="row">{rowIndex + 1}</th>
-                        {columns.map((column, columnIndex) => (
-                          <td key={column} dir="auto">{row[columnIndex] ?? ''}</td>
-                        ))}
+                        {columns.map((column, columnIndex) => {
+                          const position = `${rowIndex + 1}:${columnIndex + 1}`
+                          if (mergeLayout.covered.has(position)) return null
+                          const cell = row[columnIndex]
+                          const rowStyle = sheet.rowStyles[rowIndex]
+                          const columnStyle = sheet.columnStyles[columnIndex]
+                          const styleIndex = cell?.style ??
+                            (rowStyle >= 0 ? rowStyle : columnStyle >= 0 ? columnStyle : 0)
+                          const merge = mergeLayout.anchors.get(position)
+                          return (
+                            <td
+                              key={column}
+                              dir="auto"
+                              rowSpan={merge?.rowSpan}
+                              colSpan={merge?.columnSpan}
+                              style={cellCss(workbook.styles[styleIndex])}
+                            >
+                              {cell?.value ?? ''}
+                            </td>
+                          )
+                        })}
                       </tr>
                     ))}
                   </tbody>

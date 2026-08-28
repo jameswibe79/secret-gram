@@ -32,18 +32,44 @@ describe('SpreadsheetPreview', () => {
         sheets: [
           {
             name: 'Budget',
-            rows: [['Item', 'Amount'], ['Hosting', '48']],
+            rows: [
+              [{ value: 'Quarterly plan', style: 1 }, null],
+              [{ value: 'Hosting', style: 0 }, { value: '$48.00', style: 2 }],
+            ],
             rowCount: 2,
             columnCount: 2,
+            columnWidths: [160, 90],
+            rowHeights: [32, 0],
+            columnStyles: [-1, -1],
+            rowStyles: [-1, -1],
+            merges: [{
+              startRow: 1,
+              startColumn: 1,
+              endRow: 1,
+              endColumn: 2,
+            }],
             truncated: false,
           },
           {
             name: 'Forecast',
-            rows: [['Quarter', 'Growth'], ['Q2', '12%']],
+            rows: [
+              [{ value: 'Quarter', style: 0 }, { value: 'Growth', style: 0 }],
+              [{ value: 'Q2', style: 0 }, { value: '12%', style: 0 }],
+            ],
             rowCount: 2,
             columnCount: 2,
+            columnWidths: [112, 112],
+            rowHeights: [0, 0],
+            columnStyles: [-1, -1],
+            rowStyles: [-1, -1],
+            merges: [],
             truncated: true,
           },
+        ],
+        styles: [
+          {},
+          { backgroundColor: '#1F4E78', color: '#FFFFFF', fontWeight: 700 },
+          { textAlign: 'right' },
         ],
         truncated: true,
       },
@@ -56,6 +82,13 @@ describe('SpreadsheetPreview', () => {
     expect(screen.getByRole('cell', { name: 'Hosting' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Budget' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getByText('Preview is limited to the first cells and sheets.')).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: 'Quarterly plan' })).toHaveAttribute('colspan', '2')
+    expect(screen.getByRole('cell', { name: 'Quarterly plan' })).toHaveStyle({
+      backgroundColor: '#1F4E78',
+      color: '#FFFFFF',
+      fontWeight: '700',
+    })
+    expect(screen.getByRole('cell', { name: '$48.00' })).toHaveStyle({ textAlign: 'right' })
 
     await user.click(screen.getByRole('tab', { name: 'Forecast' }))
 

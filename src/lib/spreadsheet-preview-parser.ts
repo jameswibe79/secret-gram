@@ -5,7 +5,11 @@ import {
   MAX_SPREADSHEET_ENTRY_BYTES,
   MAX_SPREADSHEET_PREVIEW_BYTES,
   MAX_SPREADSHEET_UNCOMPRESSED_BYTES,
+  type SpreadsheetPreviewBorder,
+  type SpreadsheetPreviewCell,
+  type SpreadsheetPreviewMerge,
   type SpreadsheetPreviewSheet,
+  type SpreadsheetPreviewStyle,
   type SpreadsheetPreviewWorkbook,
 } from './spreadsheet-preview'
 
@@ -52,6 +56,26 @@ interface WorkbookDefinition {
 interface CellFormatting {
   date1904: boolean
   dateStyles: boolean[]
+  numberFormats: string[]
+  styles: SpreadsheetPreviewStyle[]
+}
+
+interface RawCellFormat {
+  fontId: number
+  fillId: number
+  borderId: number
+  numberFormatId: number
+  alignment: Pick<
+    SpreadsheetPreviewStyle,
+    'textAlign' | 'verticalAlign' | 'whiteSpace'
+  >
+}
+
+interface RawBorder {
+  top?: SpreadsheetPreviewBorder
+  right?: SpreadsheetPreviewBorder
+  bottom?: SpreadsheetPreviewBorder
+  left?: SpreadsheetPreviewBorder
 }
 
 function localName(name: string): string {
@@ -323,6 +347,68 @@ async function parseWorkbook(
   return workbook
 }
 
+const DEFAULT_THEME_COLORS = [
+  '#000000',
+  '#FFFFFF',
+  '#1F497D',
+  '#EEECE1',
+  '#4F81BD',
+  '#C0504D',
+  '#9BBB59',
+  '#8064A2',
+  '#4BACC6',
+  '#F79646',
+  '#0000FF',
+  '#800080',
+]
+
+const INDEXED_COLORS = [
+  '#000000',
+  '#FFFFFF',
+  '#FF0000',
+  '#00FF00',
+  '#0000FF',
+  '#FFFF00',
+  '#FF00FF',
+  '#00FFFF',
+  '#000000',
+  '#FFFFFF',
+  '#FF0000',
+  '#00FF00',
+  '#0000FF',
+  '#FFFF00',
+  '#FF00FF',
+  '#00FFFF',
+]
+
+const BUILT_IN_NUMBER_FORMATS: Record<number, string> = {
+  0: 'General',
+  1: '0',
+  2: '0.00',
+  3: '#,##0',
+  4: '#,##0.00',
+  9: '0%',
+  10: '0.00%',
+  11: '0.00E+00',
+  14: 'mm-dd-yy',
+  15: 'd-mmm-yy',
+  16: 'd-mmm',
+  17: 'mmm-yy',
+  18: 'h:mm AM/PM',
+  19: 'h:mm:ss AM/PM',
+  20: 'h:mm',
+  21: 'h:mm:ss',
+  22: 'm/d/yy h:mm',
+  37: '#,##0 ;(#,##0)',
+  38: '#,##0 ;[Red](#,##0)',
+  39: '#,##0.00;(#,##0.00)',
+  40: '#,##0.00;[Red](#,##0.00)',
+  45: 'mm:ss',
+  46: '[h]:mm:ss',
+  47: 'mmss.0',
+  49: '@',
+}
+
 function isDateFormat(formatCode: string): boolean {
   const normalized = formatCode
     .replace(/"[^"]*"/g, '')
@@ -332,47 +418,290 @@ function isDateFormat(formatCode: string): boolean {
   return /[yd]/.test(normalized) || /h+[^a-z]*m|m+[^a-z]*s|s+/.test(normalized)
 }
 
-async function parseDateStyles(
+function numericAttribute(value: string | undefined, fallback = 0): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+function applyColorTint(color: string, tint: number): string {
+  if (!Number.isFinite(tint) || tint === 0) return color
+  const channels = [1, 3, 5].map((offset) => Number.parseInt(color.slice(offset, offset + 2), 16))
+  const adjusted = channels.map((channel) => Math.round(
+    tint < 0 ? channel * (1 + tint) : channel + (255 - channel) * tint,
+  ))
+  return `#${adjusted.map((channel) => Math.max(0, Math.min(255, channel))
+    .toString(16).padStart(2, '0')).join('').toUpperCase()}`
+}
+
+function parseStyleColor(
+  attributes: Record<string, string>,
+  themeColors: string[],
+): string | undefined {
+  let color: string | undefined
+  const rgb = attributes.rgb
+  if (typeof rgb === 'string' && /^(?:[A-Fa-f\d]{6}|[A-Fa-f\d]{8})$/.test(rgb)) {
+    color = `#${rgb.slice(-6).toUpperCase()}`
+  } else {
+    const theme = Number(attributes.theme)
+    if (Number.isInteger(theme) && theme >= 0 && theme < themeColors.length) {
+      color = themeColors[theme]
+    } else {
+      const indexed = Number(attributes.indexed)
+      if (Number.isInteger(indexed) && indexed >= 0 && indexed < INDEXED_COLORS.length) {
+        color = INDEXED_COLORS[indexed]
+      }
+    }
+  }
+  if (color === undefined) return undefined
+  return applyColorTint(color, Number(attributes.tint))
+}
+
+async function parseThemeColors(
+  archive: JSZip,
+  expansion: ExpansionState,
+): Promise<string[]> {
+  if (archive.file('xl/theme/theme1.xml') === null) return DEFAULT_THEME_COLORS
+
+  const colors = [...DEFAULT_THEME_COLORS]
+  const slots = new Set([
+    'dk1',
+    'lt1',
+    'dk2',
+    'lt2',
+    'accent1',
+    'accent2',
+    'accent3',
+    'accent4',
+    'accent5',
+    'accent6',
+    'hlink',
+    'folHlink',
+  ])
+  let inColorScheme = false
+  let currentSlot = -1
+  await parseXmlEntry(archive, 'xl/theme/theme1.xml', expansion, (parser) => {
+    parser.on('opentag', (tag) => {
+      const name = localName(tag.name)
+      if (name === 'clrScheme') {
+        inColorScheme = true
+        return
+      }
+      if (!inColorScheme) return
+      if (slots.has(name)) {
+        currentSlot = [...slots].indexOf(name)
+        return
+      }
+      if (currentSlot === -1 || (name !== 'srgbClr' && name !== 'sysClr')) return
+      const value = name === 'sysClr' ? tag.attributes.lastClr : tag.attributes.val
+      if (typeof value === 'string' && /^[A-Fa-f\d]{6}$/.test(value)) {
+        colors[currentSlot] = `#${value.toUpperCase()}`
+      }
+    })
+    parser.on('closetag', (tag) => {
+      const name = localName(tag.name)
+      if (slots.has(name)) currentSlot = -1
+      if (name === 'clrScheme') inColorScheme = false
+    })
+  })
+  return colors
+}
+
+function borderFromStyle(style: string | undefined): SpreadsheetPreviewBorder | undefined {
+  if (style === undefined || style === 'none') return undefined
+  if (style === 'double') return { color: '#000000', style: 'double', width: 3 }
+  if (style.includes('dash')) {
+    return {
+      color: '#000000',
+      style: 'dashed',
+      width: style.startsWith('medium') ? 2 : 1,
+    }
+  }
+  if (style.includes('dot') || style === 'hair') {
+    return { color: '#000000', style: 'dotted', width: 1 }
+  }
+  return {
+    color: '#000000',
+    style: 'solid',
+    width: style === 'thick' ? 3 : style.startsWith('medium') ? 2 : 1,
+  }
+}
+
+async function parseCellFormatting(
   archive: JSZip,
   expansion: ExpansionState,
   date1904: boolean,
 ): Promise<CellFormatting> {
-  if (archive.file('xl/styles.xml') === null) return { date1904, dateStyles: [] }
+  if (archive.file('xl/styles.xml') === null) {
+    return {
+      date1904,
+      dateStyles: [false],
+      numberFormats: ['General'],
+      styles: [{}],
+    }
+  }
 
-  const customDateFormats = new Set<number>()
-  const dateStyles: boolean[] = []
-  let inCellFormats = false
+  const themeColors = await parseThemeColors(archive, expansion)
+  const customNumberFormats = new Map<number, string>()
+  const fonts: SpreadsheetPreviewStyle[] = []
+  const fills: Array<string | undefined> = []
+  const borders: RawBorder[] = []
+  const cellFormats: RawCellFormat[] = []
+  let section = ''
+  let currentFont: SpreadsheetPreviewStyle | null = null
+  let currentFill: string | undefined
+  let solidFill = false
+  let currentBorder: RawBorder | null = null
+  let currentBorderEdge: keyof RawBorder | null = null
+  let currentCellFormat: RawCellFormat | null = null
+
   await parseXmlEntry(archive, 'xl/styles.xml', expansion, (parser) => {
     parser.on('opentag', (tag) => {
       const name = localName(tag.name)
-      if (name === 'cellXfs') {
-        inCellFormats = true
+      if (name === 'fonts' || name === 'fills' || name === 'borders' || name === 'cellXfs') {
+        section = name
         return
       }
       if (name === 'numFmt') {
         const id = Number(tag.attributes.numFmtId)
         const code = tag.attributes.formatCode
-        if (Number.isInteger(id) && typeof code === 'string' && isDateFormat(code)) {
-          customDateFormats.add(id)
+        if (Number.isInteger(id) && typeof code === 'string') customNumberFormats.set(id, code)
+        return
+      }
+
+      if (section === 'fonts') {
+        if (name === 'font') {
+          currentFont = {}
+          return
+        }
+        if (currentFont === null) return
+        if (name === 'name') {
+          const fontFamily = tag.attributes.val
+          if (
+            typeof fontFamily === 'string' &&
+            /^[\p{L}\p{N} ._-]{1,64}$/u.test(fontFamily)
+          ) currentFont.fontFamily = fontFamily
+        } else if (name === 'sz') {
+          const size = Number(tag.attributes.val)
+          if (Number.isFinite(size) && size >= 6 && size <= 96) currentFont.fontSize = size
+        } else if (name === 'b' && tag.attributes.val !== '0' && tag.attributes.val !== 'false') {
+          currentFont.fontWeight = 700
+        } else if (name === 'i' && tag.attributes.val !== '0' && tag.attributes.val !== 'false') {
+          currentFont.fontStyle = 'italic'
+        } else if (name === 'u' && tag.attributes.val !== '0' && tag.attributes.val !== 'false') {
+          currentFont.textDecoration = 'underline'
+        } else if (name === 'color') {
+          currentFont.color = parseStyleColor(tag.attributes, themeColors)
         }
         return
       }
-      if (name !== 'xf' || !inCellFormats) return
-      if (dateStyles.length >= MAX_STYLES) throw new Error('XLSX contains too many styles')
-      const formatId = Number(tag.attributes.numFmtId)
-      const builtInDate = Number.isInteger(formatId) && (
-        (formatId >= 14 && formatId <= 22) ||
-        (formatId >= 27 && formatId <= 36) ||
-        (formatId >= 45 && formatId <= 47) ||
-        (formatId >= 50 && formatId <= 58)
-      )
-      dateStyles.push(builtInDate || customDateFormats.has(formatId))
+
+      if (section === 'fills') {
+        if (name === 'fill') {
+          currentFill = undefined
+          solidFill = false
+        } else if (name === 'patternFill') {
+          solidFill = tag.attributes.patternType === 'solid'
+        } else if (name === 'fgColor' && solidFill) {
+          currentFill = parseStyleColor(tag.attributes, themeColors)
+        }
+        return
+      }
+
+      if (section === 'borders') {
+        if (name === 'border') {
+          currentBorder = {}
+          return
+        }
+        if (currentBorder === null) return
+        if (name === 'top' || name === 'right' || name === 'bottom' || name === 'left') {
+          currentBorderEdge = name
+          const border = borderFromStyle(tag.attributes.style)
+          if (border !== undefined) currentBorder[name] = border
+        } else if (name === 'color' && currentBorderEdge !== null) {
+          const border = currentBorder[currentBorderEdge]
+          const color = parseStyleColor(tag.attributes, themeColors)
+          if (border !== undefined && color !== undefined) border.color = color
+        }
+        return
+      }
+
+      if (section !== 'cellXfs') return
+      if (name === 'xf') {
+        currentCellFormat = {
+          fontId: numericAttribute(tag.attributes.fontId),
+          fillId: numericAttribute(tag.attributes.fillId),
+          borderId: numericAttribute(tag.attributes.borderId),
+          numberFormatId: numericAttribute(tag.attributes.numFmtId),
+          alignment: {},
+        }
+      } else if (name === 'alignment' && currentCellFormat !== null) {
+        const horizontal = String(tag.attributes.horizontal ?? '')
+        if (horizontal === 'left' || horizontal === 'center' || horizontal === 'right') {
+          currentCellFormat.alignment.textAlign = horizontal
+        }
+        const vertical = String(tag.attributes.vertical ?? '')
+        if (vertical === 'top' || vertical === 'bottom') {
+          currentCellFormat.alignment.verticalAlign = vertical
+        } else if (vertical === 'center') {
+          currentCellFormat.alignment.verticalAlign = 'middle'
+        }
+        if (tag.attributes.wrapText === '1' || tag.attributes.wrapText === 'true') {
+          currentCellFormat.alignment.whiteSpace = 'normal'
+        }
+      }
     })
     parser.on('closetag', (tag) => {
-      if (localName(tag.name) === 'cellXfs') inCellFormats = false
+      const name = localName(tag.name)
+      if (section === 'fonts' && name === 'font' && currentFont !== null) {
+        fonts.push(currentFont)
+        currentFont = null
+      } else if (section === 'fills' && name === 'fill') {
+        fills.push(currentFill)
+        currentFill = undefined
+      } else if (section === 'borders') {
+        if (name === currentBorderEdge) currentBorderEdge = null
+        if (name === 'border' && currentBorder !== null) {
+          borders.push(currentBorder)
+          currentBorder = null
+        }
+      } else if (section === 'cellXfs' && name === 'xf' && currentCellFormat !== null) {
+        if (cellFormats.length >= MAX_STYLES) throw new Error('XLSX contains too many styles')
+        cellFormats.push(currentCellFormat)
+        currentCellFormat = null
+      }
+      if (name === section) section = ''
     })
   })
-  return { date1904, dateStyles }
+
+  if (cellFormats.length === 0) {
+    cellFormats.push({
+      fontId: 0,
+      fillId: 0,
+      borderId: 0,
+      numberFormatId: 0,
+      alignment: {},
+    })
+  }
+  const styles = cellFormats.map((format) => {
+    const border = borders[format.borderId] ?? {}
+    return {
+      ...(fonts[format.fontId] ?? {}),
+      ...(fills[format.fillId] === undefined
+        ? {}
+        : { backgroundColor: fills[format.fillId] }),
+      ...(border.top === undefined ? {} : { borderTop: border.top }),
+      ...(border.right === undefined ? {} : { borderRight: border.right }),
+      ...(border.bottom === undefined ? {} : { borderBottom: border.bottom }),
+      ...(border.left === undefined ? {} : { borderLeft: border.left }),
+      ...format.alignment,
+    }
+  })
+  const numberFormats = cellFormats.map((format) =>
+    customNumberFormats.get(format.numberFormatId) ??
+    BUILT_IN_NUMBER_FORMATS[format.numberFormatId] ??
+    'General')
+  const dateStyles = numberFormats.map(isDateFormat)
+  return { date1904, dateStyles, numberFormats, styles }
 }
 
 async function parseSharedStrings(
@@ -439,7 +768,11 @@ function rowIndex(reference: string): number | null {
   return Number.isInteger(row) && row >= 1 && row <= 1_048_576 ? row : null
 }
 
-function excelDate(serial: number, formatting: CellFormatting): string | null {
+function excelDate(
+  serial: number,
+  formatting: CellFormatting,
+  formatCode: string,
+): string | null {
   if (!Number.isFinite(serial) || serial < 0 || serial > 2_958_465) return null
   const wholeDays = Math.floor(serial)
   const milliseconds = Math.round((serial - wholeDays) * 86_400_000)
@@ -448,9 +781,40 @@ function excelDate(serial: number, formatting: CellFormatting): string | null {
     : Date.UTC(1899, 11, 30)
   const date = new Date(epoch + wholeDays * 86_400_000 + milliseconds)
   if (!Number.isFinite(date.getTime())) return null
+  const normalized = formatCode
+    .replace(/"[^"]*"/g, '')
+    .replace(/\\./g, '')
+    .replace(/\[[^\]]*]/g, '')
+    .toLowerCase()
+  const hasDate = /[yd]/.test(normalized)
+  const hasSeconds = /s/.test(normalized)
+  const timePart = date.toISOString().slice(11, hasSeconds ? 19 : 16)
+  if (!hasDate) return timePart
   const datePart = date.toISOString().slice(0, 10)
-  if (milliseconds === 0) return datePart
-  return `${datePart} ${date.toISOString().slice(11, 19)}`
+  return milliseconds === 0 ? datePart : `${datePart} ${timePart}`
+}
+
+function formattedNumber(number: number, formatCode: string, rawValue: string): string {
+  if (formatCode === 'General' || formatCode === '@') return rawValue
+  const section = (formatCode.split(';')[number < 0 ? 1 : 0] ?? formatCode)
+    .replace(/\[[^\]]*]/g, '')
+    .replace(/"([^"]*)"/g, '$1')
+    .replace(/\\(.)/g, '$1')
+  const percent = section.includes('%')
+  const decimalMatch = /\.([0#]+)/.exec(section)
+  const decimalPlaces = Math.min(decimalMatch?.[1].length ?? 0, 10)
+  const useGrouping = section.includes(',')
+  const absolute = Math.abs(percent ? number * 100 : number)
+  const rendered = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: decimalPlaces,
+    maximumFractionDigits: decimalPlaces,
+    useGrouping,
+  }).format(absolute)
+  const currency = /[$€£¥₹]/.exec(section)?.[0] ?? ''
+  const signed = number < 0
+    ? section.includes('(') ? `(${rendered})` : `-${rendered}`
+    : rendered
+  return `${currency}${signed}${percent ? '%' : ''}`
 }
 
 function displayCellValue(
@@ -469,10 +833,12 @@ function displayCellValue(
   if (type === 'b') return rawValue === '1' ? 'TRUE' : 'FALSE'
   if (type === 'e' || type === 'str' || type === 'inlineStr') return rawValue
   const number = Number(rawValue)
-  if (rawValue !== '' && Number.isFinite(number) && formatting.dateStyles[styleIndex] === true) {
-    return excelDate(number, formatting) ?? rawValue
+  if (rawValue === '' || !Number.isFinite(number)) return rawValue
+  const formatCode = formatting.numberFormats[styleIndex] ?? 'General'
+  if (formatting.dateStyles[styleIndex] === true) {
+    return excelDate(number, formatting, formatCode) ?? rawValue
   }
-  return rawValue
+  return formattedNumber(number, formatCode, rawValue)
 }
 
 function parseDimension(reference: string): { rows: number; columns: number } | null {
@@ -481,6 +847,34 @@ function parseDimension(reference: string): { rows: number; columns: number } | 
   const rows = rowIndex(lastCell)
   const columns = columnIndex(lastCell)
   return rows === null || columns === null ? null : { rows, columns }
+}
+
+function cellCoordinates(reference: string): { row: number; column: number } | null {
+  const row = rowIndex(reference)
+  const column = columnIndex(reference)
+  return row === null || column === null ? null : { row, column }
+}
+
+function parseMerge(reference: string): SpreadsheetPreviewMerge | null {
+  const [startReference, endReference = startReference] = reference.split(':')
+  const start = cellCoordinates(startReference)
+  const end = cellCoordinates(endReference)
+  if (
+    start === null ||
+    end === null ||
+    end.row < start.row ||
+    end.column < start.column
+  ) return null
+  return {
+    startRow: start.row,
+    startColumn: start.column,
+    endRow: end.row,
+    endColumn: end.column,
+  }
+}
+
+function excelColumnWidthToPixels(width: number): number {
+  return Math.max(24, Math.min(500, Math.round(width * 7 + 5)))
 }
 
 async function parseWorksheet(
@@ -492,7 +886,13 @@ async function parseWorksheet(
   formatting: CellFormatting,
   outputCells: { count: number },
 ): Promise<SpreadsheetPreviewSheet> {
-  const sparseRows: Array<string[] | undefined> = []
+  const sparseRows: Array<Array<SpreadsheetPreviewCell | undefined> | undefined> = []
+  const columnWidths: number[] = []
+  const rowHeights: number[] = []
+  const columnStyles: number[] = []
+  const rowStyles: number[] = []
+  const merges: SpreadsheetPreviewMerge[] = []
+  let defaultColumnWidth = 112
   let declaredRows = 0
   let declaredColumns = 0
   let maximumSeenRow = 0
@@ -525,6 +925,46 @@ async function parseWorksheet(
         }
         return
       }
+      if (tagName === 'sheetFormatPr') {
+        const width = Number(tag.attributes.defaultColWidth)
+        if (Number.isFinite(width) && width > 0) {
+          defaultColumnWidth = excelColumnWidthToPixels(width)
+        }
+        return
+      }
+      if (tagName === 'col') {
+        const minimum = Math.max(1, Math.floor(Number(tag.attributes.min)))
+        const maximum = Math.min(MAX_COLUMNS_PER_SHEET, Math.floor(Number(tag.attributes.max)))
+        if (!Number.isFinite(minimum) || !Number.isFinite(maximum) || maximum < minimum) return
+        const width = Number(tag.attributes.width)
+        const pixels = Number.isFinite(width) && width > 0
+          ? excelColumnWidthToPixels(width)
+          : defaultColumnWidth
+        const style = Math.floor(Number(tag.attributes.style))
+        for (let column = minimum; column <= maximum; column += 1) {
+          columnWidths[column - 1] = tag.attributes.hidden === '1' ? 24 : pixels
+          if (Number.isInteger(style) && style >= 0) columnStyles[column - 1] = style
+        }
+        if (Number(tag.attributes.max) > MAX_COLUMNS_PER_SHEET) truncated = true
+        return
+      }
+      if (tagName === 'mergeCell') {
+        const reference = tag.attributes.ref
+        const merge = typeof reference === 'string' ? parseMerge(reference) : null
+        if (merge === null) return
+        maximumSeenRow = Math.max(maximumSeenRow, merge.endRow)
+        maximumSeenColumn = Math.max(maximumSeenColumn, merge.endColumn)
+        if (
+          merge.endRow > MAX_ROWS_PER_SHEET ||
+          merge.endColumn > MAX_COLUMNS_PER_SHEET ||
+          merges.length >= MAX_PREVIEW_CELLS
+        ) {
+          truncated = true
+          return
+        }
+        merges.push(merge)
+        return
+      }
       if (tagName === 'row') {
         const explicitRow = Number(tag.attributes.r)
         currentRow = Number.isInteger(explicitRow) && explicitRow >= 1
@@ -532,7 +972,16 @@ async function parseWorksheet(
           : currentRow + 1
         nextColumn = 1
         maximumSeenRow = Math.max(maximumSeenRow, currentRow)
-        if (currentRow > MAX_ROWS_PER_SHEET) truncated = true
+        if (currentRow <= MAX_ROWS_PER_SHEET) {
+          const height = Number(tag.attributes.ht)
+          if (Number.isFinite(height) && height > 0) {
+            rowHeights[currentRow - 1] = Math.max(12, Math.min(400, height * 4 / 3))
+          }
+          const style = Math.floor(Number(tag.attributes.s))
+          if (Number.isInteger(style) && style >= 0) rowStyles[currentRow - 1] = style
+        } else {
+          truncated = true
+        }
         return
       }
       if (tagName === 'c') {
@@ -544,7 +993,11 @@ async function parseWorksheet(
         nextColumn = cellColumn + 1
         cellType = typeof tag.attributes.t === 'string' ? tag.attributes.t : ''
         const parsedStyle = Number(tag.attributes.s)
-        cellStyle = Number.isInteger(parsedStyle) && parsedStyle >= 0 ? parsedStyle : 0
+        cellStyle = Number.isInteger(parsedStyle) &&
+          parsedStyle >= 0 &&
+          parsedStyle < formatting.styles.length
+          ? parsedStyle
+          : 0
         cellValue = ''
         maximumSeenRow = Math.max(maximumSeenRow, cellRow)
         maximumSeenColumn = Math.max(maximumSeenColumn, cellColumn)
@@ -581,7 +1034,7 @@ async function parseWorksheet(
         formatting,
       )
       if (
-        value !== '' &&
+        (value !== '' || cellStyle !== 0) &&
         cellRow >= 1 &&
         cellRow <= MAX_ROWS_PER_SHEET &&
         cellColumn >= 1 &&
@@ -591,7 +1044,7 @@ async function parseWorksheet(
           truncated = true
         } else {
           const row = sparseRows[cellRow - 1] ?? []
-          row[cellColumn - 1] = value
+          row[cellColumn - 1] = { value, style: cellStyle }
           sparseRows[cellRow - 1] = row
           outputCells.count += 1
         }
@@ -601,12 +1054,31 @@ async function parseWorksheet(
   })
 
   const renderedRows = Math.min(maximumSeenRow, MAX_ROWS_PER_SHEET)
-  const rows = Array.from({ length: renderedRows }, (_, index) => sparseRows[index] ?? [])
+  const renderedColumns = Math.min(
+    Math.max(maximumSeenColumn, declaredColumns, 1),
+    MAX_COLUMNS_PER_SHEET,
+  )
+  const rows = Array.from({ length: renderedRows }, (_, rowIndexValue) =>
+    Array.from(
+      { length: renderedColumns },
+      (_, columnIndexValue) => sparseRows[rowIndexValue]?.[columnIndexValue] ?? null,
+    ))
   return {
     name,
     rows,
     rowCount: Math.max(declaredRows, maximumSeenRow),
     columnCount: Math.max(declaredColumns, maximumSeenColumn),
+    columnWidths: Array.from(
+      { length: renderedColumns },
+      (_, index) => columnWidths[index] ?? defaultColumnWidth,
+    ),
+    rowHeights: Array.from({ length: renderedRows }, (_, index) => rowHeights[index] ?? 0),
+    columnStyles: Array.from(
+      { length: renderedColumns },
+      (_, index) => columnStyles[index] ?? -1,
+    ),
+    rowStyles: Array.from({ length: renderedRows }, (_, index) => rowStyles[index] ?? -1),
+    merges,
     truncated,
   }
 }
@@ -618,7 +1090,7 @@ export async function parseSpreadsheet(arrayBuffer: ArrayBuffer): Promise<Spread
   const relationships = await parseWorkbookRelationships(archive, expansion)
   const definition = await parseWorkbook(archive, expansion)
   const sharedStrings = await parseSharedStrings(archive, expansion)
-  const formatting = await parseDateStyles(archive, expansion, definition.date1904)
+  const formatting = await parseCellFormatting(archive, expansion, definition.date1904)
   const outputCells = { count: 0 }
   const sheets: SpreadsheetPreviewSheet[] = []
   let truncated = definition.truncated
@@ -643,5 +1115,5 @@ export async function parseSpreadsheet(arrayBuffer: ArrayBuffer): Promise<Spread
   }
 
   if (sheets.length === 0) throw new Error('XLSX workbook has no readable sheets')
-  return { sheets, truncated }
+  return { sheets, styles: formatting.styles, truncated }
 }
