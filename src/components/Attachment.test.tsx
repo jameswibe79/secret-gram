@@ -62,6 +62,7 @@ const credentials = {
 }
 
 beforeEach(() => {
+  vi.unstubAllGlobals()
   vi.mocked(downloadDecryptedFile).mockReset()
   vi.stubGlobal('URL', {
     ...URL,
@@ -102,6 +103,34 @@ describe('Attachment lifecycle', () => {
     await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test'))
     expect(click).toHaveBeenCalledOnce()
     click.mockRestore()
+  })
+
+  it('does not fall back to a memory download when the save picker is canceled', async () => {
+    vi.stubGlobal('showSaveFilePicker', vi.fn().mockRejectedValue(new DOMException('Canceled', 'AbortError')))
+    const user = userEvent.setup()
+    render(<Attachment descriptor={descriptor} credentials={credentials} />)
+    await user.click(screen.getByRole('button', { name: 'Download' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('Download canceled.')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(downloadDecryptedFile).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled()
+  })
+
+  it('aborts a destination opened after the attachment is unmounted', async () => {
+    let openDestination!: (value: Pick<FileSystemWritableFileStream, 'write' | 'close' | 'abort'>) => void
+    const createWritable = vi.fn(() => new Promise((resolve) => { openDestination = resolve }))
+    vi.stubGlobal('showSaveFilePicker', vi.fn().mockResolvedValue({ createWritable }))
+    const user = userEvent.setup()
+    const rendered = render(<Attachment descriptor={descriptor} credentials={credentials} />)
+    await user.click(screen.getByRole('button', { name: 'Download' }))
+    await waitFor(() => expect(createWritable).toHaveBeenCalledOnce())
+    rendered.unmount()
+    const destination = { write: vi.fn(), close: vi.fn(), abort: vi.fn().mockResolvedValue(undefined) }
+    openDestination(destination)
+    await waitFor(() => expect(destination.abort).toHaveBeenCalledOnce())
+    expect(destination.write).not.toHaveBeenCalled()
+    expect(destination.close).not.toHaveBeenCalled()
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
   })
 
   it('opens a progress-focused preview immediately and supports cancellation', async () => {

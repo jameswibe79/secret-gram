@@ -21,6 +21,7 @@ SecretGram is a deployable reference implementation, not an independently audite
 - Real-time WebSocket delivery with one-time tickets, history catch-up, reconnects, and HTTP fallback
 - Client-side chunked encryption for images, PDFs, and arbitrary files
 - Idempotent encrypted chunk retries with ciphertext digest conflict detection
+- Browser-local streaming saves for uncached downloads when File System Access is available, with a bounded Blob fallback
 - Browser-local PDF.js previews, selectable PDF/image OCR text, and explicit confirmed handoffs to Heron Tools for scan deskew and visual page organization
 - Durable Object SQLite for room ordering and state; R2 for encrypted file chunks
 - Logical expiration on read paths plus alarm-driven physical cleanup
@@ -100,7 +101,7 @@ Read [Security and threat model](docs/SECURITY.md) before deploying.
 | Messages per room | 600 per minute |
 | Retained messages per room | 10,000 messages or 256 MiB ciphertext characters |
 
-The current download implementation assembles the decrypted file in browser memory. Implement a streaming file-system sink before raising the 64 MiB ceiling.
+Uncached downloads use a user-selected file destination in browsers with `showSaveFilePicker`: chunks are authenticated, decrypted, and written sequentially with disk backpressure. Previewed files reuse their existing Blob; browsers without File System Access also use an in-memory Blob. The 64 MiB ceiling is unchanged because previews and fallback downloads still need browser memory.
 
 ## Local development
 
@@ -136,6 +137,17 @@ This runs:
 7. the production Vite build
 
 Individual commands are available as `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:worker`, and `npm run build`.
+
+GitHub Actions runs the quality gate and a two-browser smoke against the built application on pull requests and `main` pushes. Production monitoring runs health/header checks every 15 minutes and a full synthetic room lifecycle every six hours, using the `SECRETGRAM_BASE_URL` repository variable. Schedules are best-effort, not an availability SLA.
+
+To run the real browser smoke locally or against a deployment, use Node.js 22 or later:
+
+```bash
+npx playwright install chromium
+SECRETGRAM_BASE_URL=https://your-worker.example npm run smoke
+```
+
+The smoke creates a five-minute synthetic room, verifies messaging, pins, history, two-chunk file integrity, streaming/fallback downloads, and local previews, then waits for expiration and checks access rejection. It never retains room credentials. See [Operations](docs/OPERATIONS.md) for monitoring, cleanup evidence, and failure notifications.
 
 ## Deployment
 

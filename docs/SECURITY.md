@@ -138,6 +138,10 @@ The optional Heron Tools handoffs are the only intentional external plaintext tr
 
 A CSP reduces exploitation opportunities but does not make a malicious first-party deployment safe.
 
+Explicit file saves may write authenticated plaintext sequentially to a user-selected local file through the File System Access API. The service still receives only ciphertext. A failed or canceled transfer aborts the temporary destination instead of committing a partial file. This is not a promise of forensic erasure of browser/OS temporary files; endpoint storage remains inside the user's trust boundary. Previews and unsupported-browser downloads still use local Blobs, and the 64 MiB limit remains in force.
+
+Repository CI and synthetic monitoring use generated test content and ephemeral browser contexts. Room secrets and authorization material must never enter Actions artifacts, traces, screenshots, browser profiles, or logs. The optional smoke record contains only the origin, opaque room locator, and expiration time for operator cleanup verification; treat it as routing metadata, not public telemetry. CI has read-only repository permissions and no Cloudflare deployment credentials. Production releases remain explicit operator-local actions.
+
 ## Logging policy
 
 Production logs must never include:

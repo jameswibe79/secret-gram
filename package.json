@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:worker": "vitest run --config vitest.worker.config.ts",
+    "smoke": "node scripts/smoke.mjs",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.worker.json --noEmit",
     "check": "npm run lint && npm run typecheck && npm run test && npm run test:worker && npm audit --audit-level=moderate && npm run build",
     "deploy": "npm run check && wrangler deploy"
@@ -48,13 +49,17 @@
     "@vitejs/plugin-react": "^6.0.4",
     "jsdom": "^29.0.1",
     "oxlint": "^1.75.0",
+    "playwright": "1.63.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.2.0",
-    "vitest": "^4.1.10",
+    "vitest": "^4.1.11",
     "wrangler": "^4.118.0"
   },
   "overrides": {
-    "undici": "7.29.0"
+    "undici": "7.29.0",
+    "miniflare": {
+      "sharp": "0.35.4"
+    }
   }
 }

@@ -37,7 +37,7 @@ Before creating resources, review `wrangler.jsonc`:
 | `MAX_FILE_BYTES` | 67,108,864 | encrypted file plaintext ceiling, 64 MiB |
 | `MAX_ROOM_FILE_BYTES` | 536,870,912 | total encrypted file reservations per room, 512 MiB |
 
-The browser protocol has the same 64 MiB ceiling and assembles downloads in memory. Lower this limit in both `src/shared/protocol.ts` and `wrangler.jsonc` if target clients cannot safely handle it. Do not raise it without implementing and testing a streaming client-side file sink.
+The browser protocol has the same 64 MiB ceiling. Uncached explicit downloads stream into a local file in browsers supporting File System Access; previews, cached-preview downloads, and unsupported browsers use Blobs. Lower this limit in both `src/shared/protocol.ts` and `wrangler.jsonc` if target clients cannot safely handle it. Streaming alone does not justify raising the limit while the fallback and preview paths still assemble files in memory.
 
 Also choose the R2 location/jurisdiction before bucket creation if your organization has data-residency requirements. A location hint is not itself a legal residency guarantee; verify the current Cloudflare R2 terms and product controls.
 
@@ -177,7 +177,7 @@ Use two independent browser profiles, not two tabs sharing extension or process 
 5. A sends text; B decrypts it.
 6. B replies; A decrypts it.
 7. Upload a small PNG and verify local image preview in both browsers.
-8. Upload a small PDF and verify the decrypted Blob opens in the browser-native PDF viewer; confirm selectable text or browser OCR when the test browser supports it.
+8. Upload a small digital PDF and verify the bundled PDF.js reader renders it and exposes selectable text in both browsers. Check a scanned PDF separately for local OCR; the browser-native viewer is only an optional escape hatch.
 9. Upload a synthetic `.docx` containing headings, lists, a table, and an embedded image; verify the local Word preview in both browsers and confirm no document-authored remote request is made.
 10. Upload a small MP4 and verify browser-local playback controls work in both browsers.
 11. Upload a generic file and verify its downloaded bytes or checksum locally.
@@ -187,6 +187,15 @@ Use two independent browser profiles, not two tabs sharing extension or process 
 15. Inspect browser developer tools: no plaintext message or room code should appear in HTTP request URLs or server responses.
 
 Use synthetic test content only.
+
+The automated release smoke is:
+
+```bash
+npx playwright install chromium
+SECRETGRAM_BASE_URL=\"$BASE_URL\" SECRETGRAM_SMOKE_RECORD=.artifacts/synthetic-room.json npm run smoke
+```
+
+It uses two isolated Chromium contexts and five-minute synthetic rooms. It covers bidirectional live messages, pin replacement/unpin, history after rejoin, a file crossing the 4 MiB chunk boundary, byte-verified Blob downloads, real File System Access writes using an origin-private file handle in place of an unattended OS picker, PNG/PDF/DOCX/XLSX previews, and expired room/history/chunk denial. The generated local file is removed and browser contexts are discarded. Manually verify the native save dialog, cancellation, browser compatibility, scanned-PDF OCR, and video playback as separate release checks. Physical R2 cleanup must be checked separately using the opaque record.
 
 ## 10. Rollback and release records
 
@@ -200,12 +209,24 @@ Before exposing the deployment broadly:
 
 A Worker rollback does not automatically reverse Durable Object schema changes or restore deleted room data. Design every future schema migration for forward compatibility and rehearse rollback before applying it to production data.
 
-## CI/CD recommendations
+## CI, monitoring, and release authorization
 
-- Pin Node and use `npm ci`.
-- Run `npm run check` before deployment.
-- Use a dedicated Cloudflare API token with minimum required permissions.
-- Protect the production environment with approvals.
-- Do not upload source maps publicly if they expose private implementation details.
-- Keep deployment logs free of room credentials and request bodies.
-- Use separate staging resources and a distinct R2 bucket if a staging environment is added; Wrangler environment bindings are not inherited automatically.
+`.github/workflows/ci.yml` runs `npm ci`, `npm run check`, and the full browser smoke against the built application on pull requests and `main` pushes. Official Actions are pinned to commit hashes. The CI browser process is local to the runner and does not touch production.
+
+`.github/workflows/monitor.yml` runs production health/header checks every 15 minutes and the full five-minute synthetic lifecycle every six hours. Both modes can also be dispatched manually. Configure the public origin once:
+
+```bash
+gh variable set SECRETGRAM_BASE_URL --body https://your-worker.example
+```
+
+Enable GitHub Actions failure notifications for the responsible operator. Only short-lived opaque cleanup metadata is uploaded; screenshots, traces, HAR, credentials, and downloaded content are not artifacts. GitHub cron is best-effort and may be delayed or disabled after repository inactivity; this baseline is not a multi-region uptime SLA.
+
+Production deployment intentionally stays on the authorized operator's workstation. CI has no Cloudflare token, does not deploy on push, and does not reuse local OAuth credentials. Before each deployment:
+
+1. Require the reviewed commit's CI result to be green.
+2. Run `npm run deploy -- --dry-run` and inspect the reported bindings.
+3. Record `git rev-parse HEAD` and the active version from `npx wrangler deployments list`.
+4. Run `npm run deploy` explicitly and record the new Worker version.
+5. Run the deployed smoke, confirm R2 lifecycle/cleanup, and retain the previous version as the rollback point.
+
+If rollback is necessary, use `npx wrangler rollback <previous-version-id> --message \"Release regression\"` and repeat the deployed checks. Do not rehearse by rolling production backward and forward unnecessarily. No schema migration is part of the streaming-download and automation change; rehearse schema-changing releases with separate staging resources and a distinct R2 bucket.

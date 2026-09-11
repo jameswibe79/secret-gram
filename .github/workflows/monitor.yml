@@ -1,0 +1,59 @@
+name: Production monitoring
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Health only or complete five-minute room lifecycle'
+        type: choice
+        options: [full, health]
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-monitor-${{ github.event.schedule || inputs.mode || 'full' }}
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SECRETGRAM_BASE_URL: ${{ vars.SECRETGRAM_BASE_URL }}
+      SECRETGRAM_SMOKE_RECORD: .artifacts/synthetic-room.json
+      HEALTH_ONLY: ${{ github.event.schedule == '*/15 * * * *' || inputs.mode == 'health' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - if: env.HEALTH_ONLY != 'true'
+        run: npx playwright install --with-deps chromium
+      - name: Check production surface
+        run: |
+          if [ "$HEALTH_ONLY" = 'true' ]; then
+            npm run smoke -- --health
+          else
+            npm run smoke
+          fi
+      - name: Retain only opaque synthetic cleanup metadata
+        if: always() && env.HEALTH_ONLY != 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: synthetic-room-${{ github.run_id }}
+          path: .artifacts/synthetic-room.json
+          retention-days: 2
+          if-no-files-found: ignore
+      - name: Record monitoring result
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          printf 'Production monitoring: %s\n\nFailures require operator investigation; enable GitHub Actions failure notifications.\n' "$JOB_STATUS" >> "$GITHUB_STEP_SUMMARY"

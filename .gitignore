@@ -17,6 +17,7 @@ dist-ssr
 .env.*
 !.env.example
 worker-configuration.d.ts
+.artifacts/
 
 # Editor directories and files
 .vscode/*

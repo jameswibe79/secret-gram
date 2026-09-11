@@ -25,7 +25,7 @@ It does not define organization SSO, billing, enterprise audit, legal hold, DLP,
 
 ### Stateless health
 
-Check every minute from at least two regions:
+For minute-level, multi-region availability targets, provision independent probes from at least two regions. The repository's best-effort GitHub Actions baseline below does not provide that SLA.
 
 ```text
 GET /api/v1/health
@@ -43,18 +43,34 @@ This check does not exercise Durable Objects, R2, WebSockets, or encryption.
 
 ### Stateful synthetic room
 
-Run a scheduled synthetic test with non-sensitive generated content:
+`.github/workflows/monitor.yml` runs health/header checks every 15 minutes and the full browser synthetic every six hours. Configure the `SECRETGRAM_BASE_URL` repository variable and enable Actions failure notifications for the responsible operator. Use `workflow_dispatch` to run either mode on demand. GitHub may delay scheduled jobs or disable schedules after repository inactivity; inspect workflow activity as part of monthly maintenance.
 
-1. generate a room credential in a controlled browser runner;
-2. create and authenticate the room;
-3. obtain and consume a WebSocket ticket;
-4. send one encrypted message and verify sequence/acknowledgement;
-5. pin it, verify the versioned pin state over HTTP and WebSocket, then clear it;
-6. fetch history and decrypt locally;
-7. upload two encrypted test chunks, complete the upload, download them, and verify local integrity;
-8. allow the synthetic room to expire or explicitly track it until cleanup.
+The full `npm run smoke` uses two isolated Chromium contexts and generated non-sensitive content:
 
-Never reuse production user room codes. Tag synthetic monitoring through an out-of-band operator record, not plaintext inside the encrypted service.
+1. create a room through the browser, changing only the synthetic creation request to the public API's supported five-minute lifetime;
+2. join another browser context using an invitation held only in process memory;
+3. verify bidirectional WebSocket messages and local decryption;
+4. pin a message, replace the pin, reload/rejoin, verify history and restored pin state, then unpin;
+5. upload a binary file spanning two encrypted chunks, download it through the Blob fallback, and compare every byte;
+6. stream the same file through a real browser File System Access destination, compare its SHA-256 digest, and remove the generated local file;
+7. verify PNG, selectable PDF, DOCX, and XLSX previews in both peers;
+8. wait for room expiry and verify room metadata, history, and an uploaded chunk return 404 or 410.
+
+The unattended streaming check substitutes an origin-private file handle for the OS picker; it still exercises the real disk writer and commit. It does not prove native-dialog behavior, video playback, or scanned-image OCR. Browser exceptions are reduced to a named failing stage because raw automation errors can contain form values or credentials.
+
+Never reuse production user room codes. Set `SECRETGRAM_SMOKE_RECORD=.artifacts/synthetic-room.json` to retain only origin, opaque locator, and expiration for physical-cleanup follow-up. The scheduled workflow retains this metadata for two days, including on failure, but never uploads profiles, credentials, screenshots, traces, HAR, or attachment bytes. The runner waits for logical expiry; it does not claim to have inspected R2.
+
+After a release, inspect the recorded synthetic room's exact `rooms/{locator}/` prefix in private R2 and confirm physical deletion after its expiration. Do not browse or delete unrelated rooms. If objects remain, follow the cleanup incident procedure below; an API 404/410 alone proves access denial, not physical erasure.
+
+Local use:
+
+```bash
+npx playwright install chromium
+SECRETGRAM_BASE_URL=https://your-worker.example npm run smoke -- --health
+SECRETGRAM_BASE_URL=https://your-worker.example SECRETGRAM_SMOKE_RECORD=.artifacts/synthetic-room.json npm run smoke
+```
+
+For local end-to-end verification, build first and run `npm run preview -- --host 127.0.0.1 --port 5188 --strictPort` in another terminal, then use `SECRETGRAM_BASE_URL=http://127.0.0.1:5188`. Vite development dependency optimization can reload tabs and discard their in-memory credentials; use the production preview for stable smoke runs. Static production headers are checked on non-loopback HTTPS origins.
 
 ## Recommended alerts
 
@@ -179,6 +195,8 @@ Never log room codes, fragments, bearer tokens, tickets, request bodies, ciphert
 6. Record Worker version and build inputs.
 7. Verify health, headers, two-browser text, pin/replace/unpin synchronization, WebSocket, image, PDF, DOCX, and generic file flows.
 8. Monitor errors and cleanup events through the observation window.
+
+CI is validation-only. The authorized operator deploys locally with `npm run deploy`; a push never deploys production and no Cloudflare OAuth token is copied into GitHub. Record the reviewed commit, previous Worker version, new Worker version, smoke result, and lifecycle verification together. The local package override for Miniflare's `sharp` pins the libheif security fix at 0.35.4 until the compatible Cloudflare test toolchain includes it; do not remove it while it reintroduces the advisory. Vitest must resolve to 4.1.11 or later within the supported major.
 
 ## Rollback
 

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FileDescriptor } from '../shared/protocol'
 import {
   downloadDecryptedFile,
+  downloadDecryptedFileToWritable,
   type FileTransferCredentials,
 } from '../lib/file-transfer'
 import { MAX_WORD_PREVIEW_BYTES } from '../lib/word-preview'
@@ -76,6 +77,10 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
   const [previewOpen, setPreviewOpen] = useState(false)
   const [error, setError] = useState('')
   const [autoPreviewRequested, setAutoPreviewRequested] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState('')
+  const [downloadNotice, setDownloadNotice] = useState('')
+  const downloadAbortRef = useRef<AbortController | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const blobPromiseRef = useRef<Promise<Blob> | null>(null)
   const previewBlobRef = useRef<Blob | null>(null)
@@ -120,6 +125,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
     return () => {
       mountedRef.current = false
       abortRef.current?.abort()
+      downloadAbortRef.current?.abort()
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
       objectUrlRef.current = ''
       previewBlobRef.current = null
@@ -166,26 +172,68 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
   }, [credentials, descriptor])
 
   async function download() {
-    let temporaryUrl = false
-    let url = objectUrlRef.current
+    if (downloadAbortRef.current) return
+    const controller = new AbortController()
+    downloadAbortRef.current = controller
+    setDownloading(true)
+    setProgress(0)
+    setDownloadError('')
+    setDownloadNotice('')
+    let temporaryUrl = ''
     try {
-      if (!url) {
-        url = URL.createObjectURL(await getBlob())
-        temporaryUrl = true
+      const picker = (window as Window & {
+        showSaveFilePicker?: (options: { suggestedName: string }) => Promise<FileSystemFileHandle>
+      }).showSaveFilePicker
+      if (picker && !objectUrlRef.current) {
+        // Invoke the picker in the click handler, before transient activation expires.
+        const handle = await picker.call(window, { suggestedName: safeDownloadName(descriptor.name) })
+        if (controller.signal.aborted || !mountedRef.current) return
+        const writable = await handle.createWritable()
+        await downloadDecryptedFileToWritable(descriptor, credentials, writable, {
+          signal: controller.signal,
+          onProgress: ({ completedBytes, totalBytes, completedChunks, totalChunks }) => {
+            if (mountedRef.current) {
+              setProgress(totalBytes === 0 ? completedChunks / totalChunks : completedBytes / totalBytes)
+            }
+          },
+        })
+        if (mountedRef.current) setDownloadNotice('File saved.')
+      } else {
+        let url = objectUrlRef.current
+        if (!url) {
+          const blob = await downloadDecryptedFile(descriptor, credentials, {
+            signal: controller.signal,
+            onProgress: ({ completedBytes, totalBytes, completedChunks, totalChunks }) => {
+              if (mountedRef.current) {
+                setProgress(totalBytes === 0 ? completedChunks / totalChunks : completedBytes / totalBytes)
+              }
+            },
+          })
+          if (controller.signal.aborted || !mountedRef.current) return
+          temporaryUrl = URL.createObjectURL(blob)
+          url = temporaryUrl
+        }
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = safeDownloadName(descriptor.name)
+        anchor.rel = 'noopener'
+        document.body.append(anchor)
+        anchor.click()
+        anchor.remove()
+        if (mountedRef.current) setDownloadNotice('Download handed to your browser.')
       }
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = safeDownloadName(descriptor.name)
-      anchor.rel = 'noopener'
-      document.body.append(anchor)
-      anchor.click()
-      anchor.remove()
-    } catch {
-      // The inline error gives the user the recovery state.
+    } catch (error) {
+      if (mountedRef.current) {
+        if (controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+          setDownloadNotice('Download canceled.')
+        } else {
+          setDownloadError('The file could not be saved or failed its integrity check. Try downloading again.')
+        }
+      }
     } finally {
-      if (temporaryUrl && url) {
-        window.setTimeout(() => URL.revokeObjectURL(url), 0)
-      }
+      if (temporaryUrl) window.setTimeout(() => URL.revokeObjectURL(temporaryUrl), 0)
+      if (downloadAbortRef.current === controller) downloadAbortRef.current = null
+      if (mountedRef.current) setDownloading(false)
     }
   }
 
@@ -273,6 +321,22 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
     }
   }
 
+  const downloadFeedback = (
+    <>
+      {downloading && (
+        <div className="transfer-progress" aria-live="polite">
+          <progress max={1} value={progress} aria-label={`${descriptor.name} download progress`} />
+          <span>Saving locally… {Math.round(progress * 100)}%</span>
+          <button className="inline-button" type="button" onClick={() => downloadAbortRef.current?.abort()}>
+            Cancel download
+          </button>
+        </div>
+      )}
+      {downloadError && <p className="inline-error" role="alert">{downloadError}</p>}
+      {downloadNotice && <p className="attachment-note" role="status">{downloadNotice}</p>}
+    </>
+  )
+
   if (presentation === 'thumbnail') {
     return (
       <span
@@ -309,7 +373,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             </span>
           </div>
           <div className="attachment-viewer-actions">
-            <Button variant="outline" size="sm" type="button" disabled={loading} onClick={download}>
+            <Button variant="outline" size="sm" type="button" disabled={loading || downloading} onClick={download}>
               <Download />
               Download
             </Button>
@@ -329,6 +393,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             )}
           </div>
         </header>
+        <div className="attachment-download-feedback">{downloadFeedback}</div>
 
         <div className="attachment-viewer-stage">
           {loading && (
@@ -369,7 +434,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
                     ? 'Files over 64 MB are not previewed to protect browser memory.'
                     : 'This file type does not have a safe browser-local preview.'}
               </p>
-              <Button type="button" onClick={download}><Download /> Download file</Button>
+              <Button type="button" disabled={downloading} onClick={download}><Download /> Download file</Button>
             </div>
           )}
           {!loading && !error && previewType !== 'none' && !objectUrl && (
@@ -377,7 +442,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
               <span className="viewer-file-glyph" aria-hidden="true">{previewGlyph}</span>
               <h3>Preview in this browser</h3>
               <p>The file will be downloaded, integrity-checked, and decrypted only on this device.</p>
-              <Button type="button" onClick={prepareInlinePreview}>Load preview</Button>
+              <Button type="button" disabled={downloading} onClick={prepareInlinePreview}>Load preview</Button>
             </div>
           )}
           {!loading && previewType === 'image' && objectUrl && previewBlob && (
@@ -416,7 +481,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             <button
               type="button"
               className="preview-thumb"
-              disabled={loading}
+              disabled={loading || downloading}
               aria-label={`Open ${descriptor.name} preview`}
               onClick={openPreview}
             >
@@ -467,21 +532,15 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             </div>
           </div>
           <div className="attachment-actions">
-            <Button variant="secondary" size="sm" type="button" disabled={loading} onClick={download}>
+            <Button variant="secondary" size="sm" type="button" disabled={loading || downloading} onClick={download}>
               <Download />
               Download
             </Button>
           </div>
         </div>
       </div>
+      {!previewOpen && downloadFeedback}
 
-      {loading && !previewOpen && previewType === 'none' && (
-        <div className="transfer-progress" aria-live="polite">
-          <progress max={1} value={progress} aria-label={`${descriptor.name} download progress`} />
-          <span>Downloading and decrypting… {Math.round(progress * 100)}%</span>
-          <button className="inline-button" type="button" onClick={cancelLoad}>Cancel</button>
-        </div>
-      )}
       {error && !previewOpen && <p className="inline-error" role="alert">{error}</p>}
 
       {previewOpen && (
@@ -510,7 +569,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
             </div>
             {objectUrl && previewBlob && (
               <div className="preview-toolbar-actions">
-                <Button variant="outline" size="sm" type="button" onClick={download}>
+                <Button variant="outline" size="sm" type="button" disabled={downloading} onClick={download}>
                   <Download />
                   Download
                 </Button>
@@ -531,6 +590,7 @@ export function Attachment({ descriptor, credentials, presentation = 'card' }: A
               </div>
             )}
           </div>
+          {downloadFeedback}
           {loading && (
             <div className="preview-loading-state" aria-live="polite">
               <span className="preview-loading-art" aria-hidden="true"><i /></span>

@@ -7,7 +7,7 @@ import {
   getEncryptedChunk,
   putEncryptedChunk,
 } from './api'
-import { downloadDecryptedFile, uploadEncryptedFile } from './file-transfer'
+import { downloadDecryptedFile, downloadDecryptedFileToWritable, uploadEncryptedFile } from './file-transfer'
 
 vi.mock('./api', () => ({
   beginEncryptedUpload: vi.fn(),
@@ -100,5 +100,66 @@ describe('encrypted file transfer', () => {
 
     expect(await blob.text()).toBe('confidential')
     expect(blob.type).toBe('text/plain')
+  })
+
+  it('waits for disk backpressure and commits only the fully authenticated file', async () => {
+    const descriptor = await uploadEncryptedFile(new File(['abcdefgh'], 'stream.bin'), credentials, { chunkSize: 4 })
+    const chunks = vi.mocked(putEncryptedChunk).mock.calls.map((call) => call[5])
+    vi.mocked(getEncryptedChunk).mockImplementation(async (_locator, _token, _fileId, index) => chunks[index]!)
+    let releaseWrite!: () => void
+    const blocked = new Promise<void>((resolve) => { releaseWrite = resolve })
+    const saved: BlobPart[] = []
+    let committed = ''
+    const operation = downloadDecryptedFileToWritable(descriptor, credentials, {
+      async write(chunk) {
+        await blocked
+        if (!(chunk instanceof Uint8Array)) throw new Error('Expected binary chunk')
+        saved.push(new Uint8Array(chunk))
+      },
+      async close() { committed = await new Blob(saved).text() },
+      async abort() { saved.length = 0 },
+    })
+    await vi.waitFor(() => expect(getEncryptedChunk).toHaveBeenCalledTimes(1))
+    expect(committed).toBe('')
+    releaseWrite()
+    await operation
+    expect(committed).toBe('abcdefgh')
+  })
+
+  it('discards partial output when a later chunk fails authentication', async () => {
+    const descriptor = await uploadEncryptedFile(new File(['abcdefgh'], 'tampered.bin'), credentials, { chunkSize: 4 })
+    const chunks = vi.mocked(putEncryptedChunk).mock.calls.map((call) => new Uint8Array(call[5]))
+    chunks[1]![0] ^= 1
+    vi.mocked(getEncryptedChunk).mockImplementation(async (_locator, _token, _fileId, index) => chunks[index]!)
+    let stagedBytes = 0
+    let committed = false
+    await expect(downloadDecryptedFileToWritable(descriptor, credentials, {
+      async write(chunk) {
+        if (!(chunk instanceof Uint8Array)) throw new Error('Expected binary chunk')
+        stagedBytes += chunk.byteLength
+      },
+      async close() { committed = true },
+      async abort() { stagedBytes = 0 },
+    })).rejects.toThrow()
+    expect(stagedBytes).toBe(0)
+    expect(committed).toBe(false)
+  })
+
+  it('does not commit when canceled during the final disk write', async () => {
+    const descriptor = await uploadEncryptedFile(new File(['abcd'], 'cancel.bin'), credentials, { chunkSize: 4 })
+    vi.mocked(getEncryptedChunk).mockResolvedValue(vi.mocked(putEncryptedChunk).mock.calls[0]![5])
+    const controller = new AbortController()
+    let staged = false
+    let committed = false
+    await expect(downloadDecryptedFileToWritable(descriptor, credentials, {
+      async write() {
+        staged = true
+        controller.abort()
+      },
+      async close() { committed = true },
+      async abort() { staged = false },
+    }, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(staged).toBe(false)
+    expect(committed).toBe(false)
   })
 })

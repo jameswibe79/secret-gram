@@ -163,13 +163,11 @@ export async function uploadEncryptedFile(
   return descriptor
 }
 
-export async function downloadDecryptedFile(
-  unsafeDescriptor: FileDescriptor,
+async function* decryptedFileChunks(
+  descriptor: FileDescriptor,
   credentials: FileTransferCredentials,
-  options: DownloadFileOptions = {},
-): Promise<Blob> {
-  const descriptor = fileDescriptorSchema.parse(unsafeDescriptor)
-  const parts: ArrayBuffer[] = []
+  options: DownloadFileOptions,
+): AsyncGenerator<Uint8Array<ArrayBuffer>> {
 
   for (let index = 0; index < descriptor.chunkCount; index += 1) {
     ensureNotAborted(options.signal)
@@ -184,7 +182,8 @@ export async function downloadDecryptedFile(
       options,
     )
     const plaintext = await decryptFileChunk(descriptor, credentials.locator, index, ciphertext)
-    parts.push(plaintext.buffer.slice(plaintext.byteOffset, plaintext.byteOffset + plaintext.byteLength))
+    ensureNotAborted(options.signal)
+    yield plaintext
     const completedBytes = Math.min((index + 1) * descriptor.chunkSize, descriptor.size)
     options.onProgress?.({
       phase: 'download',
@@ -197,5 +196,43 @@ export async function downloadDecryptedFile(
     })
   }
 
+  ensureNotAborted(options.signal)
+}
+
+export async function downloadDecryptedFile(
+  unsafeDescriptor: FileDescriptor,
+  credentials: FileTransferCredentials,
+  options: DownloadFileOptions = {},
+): Promise<Blob> {
+  const descriptor = fileDescriptorSchema.parse(unsafeDescriptor)
+  const parts: Uint8Array<ArrayBuffer>[] = []
+  for await (const plaintext of decryptedFileChunks(descriptor, credentials, options)) {
+    parts.push(plaintext)
+  }
   return new Blob(parts, { type: descriptor.mimeType })
+}
+
+export async function downloadDecryptedFileToWritable(
+  unsafeDescriptor: FileDescriptor,
+  credentials: FileTransferCredentials,
+  writable: Pick<FileSystemWritableFileStream, 'write' | 'close' | 'abort'>,
+  options: DownloadFileOptions = {},
+): Promise<void> {
+  try {
+    const descriptor = fileDescriptorSchema.parse(unsafeDescriptor)
+    for await (const plaintext of decryptedFileChunks(descriptor, credentials, options)) {
+      // Await disk backpressure before fetching or decrypting another chunk.
+      await writable.write(plaintext)
+    }
+    ensureNotAborted(options.signal)
+    // File System Access commits the temporary file only after all chunks authenticate.
+    await writable.close()
+  } catch (error) {
+    try {
+      await writable.abort(error)
+    } catch {
+      // Preserve the original transfer error if the destination is already closed.
+    }
+    throw error
+  }
 }
