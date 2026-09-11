@@ -24,6 +24,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - run: npx wrangler types
       - run: npm run check
       - run: npx playwright install --with-deps chromium
       - name: Exercise built application in two browsers

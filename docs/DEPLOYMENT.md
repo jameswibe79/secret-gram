@@ -211,7 +211,7 @@ A Worker rollback does not automatically reverse Durable Object schema changes o
 
 ## CI, monitoring, and release authorization
 
-`.github/workflows/ci.yml` runs `npm ci`, `npm run check`, and the full browser smoke against the built application on pull requests and `main` pushes. Official Actions are pinned to commit hashes. The CI browser process is local to the runner and does not touch production.
+`.github/workflows/ci.yml` runs `npm ci`, `npx wrangler types`, `npm run check`, and the full browser smoke against the built application on pull requests and `main` pushes. Bindings are generated on every clean checkout rather than committed. Official Actions are pinned to commit hashes. The CI browser process is local to the runner and does not touch production.
 
 `.github/workflows/monitor.yml` runs production health/header checks every 15 minutes and the full five-minute synthetic lifecycle every six hours. Both modes can also be dispatched manually. Configure the public origin once:
 
